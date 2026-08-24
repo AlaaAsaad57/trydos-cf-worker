@@ -248,22 +248,50 @@ cannot hold either workload. Free is for zone setup and DNS only.
 
 ---
 
-## 5. Open questions — unverified, do not build on these
+## 5. Open questions
 
-1. **Underscore hostnames.** `media_server.ramaaz.dev` contains an underscore.
-   CA/Browser Forum rules prohibit underscores in certificate SAN dNSNames, but
-   whether Cloudflare's `*.ramaaz.dev` Universal SSL wildcard serves this
-   hostname when proxied is **not confirmed**. Test empirically (add zone,
-   proxy the record, curl) before designing around it. If it fails, the media
-   host has to be renamed, which is a trydos + MediaServing change.
-2. True production hostnames (§3.9).
+### Resolved 2026-08-24 by live probing
+
+- ✅ **`ramaaz.dev` is already on Cloudflare.** Nameservers are
+  `sara.ns.cloudflare.com` / `benedict.ns.cloudflare.com`. A Cloudflare account
+  and zone already exist.
+- ✅ **Underscore hostnames are not a blocker.** `media_server.ramaaz.dev`
+  resolves to Cloudflare IPs (`188.114.96.6`, `2606:4700:…`) and serves over
+  HTTPS today: `server: cloudflare`, `cf-ray` present, valid TLS. The
+  CA/Browser underscore concern does not bite here.
+- ✅ **Media is already proxied through Cloudflare, and is cacheable.**
+  `GET /image/upload/...` returns `cf-cache-status: MISS` with
+  `cache-control: max-age=14400`. So §2 step 1 is **not a migration** — it is
+  cache-rule and cache-key tuning on an existing setup.
+- ✅ **CloudFront was never deployed.** `cdn.ramaaz.dev` is NXDOMAIN.
+  `CLOUDFRONT_CDN_ROLLOUT.md` is a request to DevOps that was never actioned —
+  a direct example of why §0 exists.
+- ✅ **`trydos.com` is registered and healthy, but its DNS points at registrar
+  parking.** RDAP (Verisign): registrar Instra, registered 2024-07-14, expires
+  **2027-07-14**, status `client transfer prohibited` (normal). Nameservers are
+  `ns3/ns7.expirationwarning.net` — Instra's default parking NS. Both
+  `trydos.com` and `dev.trydos.com` resolve to `51.195.17.68`, which serves an
+  nginx `302 → /index.php` parking page. The domain is **not** expired; it was
+  simply never pointed at the app.
+
+### Still open
+
+1. **Which hostname serves the real storefront today?** `.env.production` sets
+   `NEXT_PUBLIC_APP_URL=https://dev.trydos.com`, which currently serves the
+   parking page. The Vercel project is `trydos-front`
+   (`../trydos/.vercel/project.json`). Needs an answer from the user — every
+   DNS and cache decision depends on it.
+2. **Is `trydos.com` the intended production domain**, and is moving its
+   nameservers to Cloudflare in scope?
 3. What actually POSTs `multipart/form-data` through `/api/proxy`
-   (`route.ts:196`). Media uploads appear to bypass it, but this is unconfirmed,
-   and whatever uses it inherits the 100 MB cap.
+   (`route.ts:196`). `FormData` is constructed in `services/auth.ts:939`,
+   `services/order.ts:27,515`, `services/sellerDashboard/index.ts:337,444,585,757`,
+   `services/story.ts:82`, `services/wallet/index.ts:260`,
+   `components/Chat/chatsFunctions.tsx:521`. Not yet confirmed which of these
+   route via `fetchData` (and therefore the proxy) versus fetch directly.
+   Whatever does inherits the 100 MB cap.
 4. Whether HTML is cacheable for anonymous users in practice — needs a real look
    at what varies on the `User-Data` cookie during render.
-5. Current CloudFront distribution config — `CLOUDFRONT_CDN_ROLLOUT.md` is a
-   request to DevOps, not a record of what was deployed.
 
 ---
 
