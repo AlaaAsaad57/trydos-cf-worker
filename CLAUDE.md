@@ -347,6 +347,31 @@ Still true after the flip, and expected: `cf-cache-status: DYNAMIC`, HTML still
 `no-store` and still setting four cookies per response. Proxying changed
 nothing about caching — that remains the §5 trydos-side work.
 
+### 3.14 ✅ CUT OVER — the Worker serves `/api/proxy` (2026-08-24)
+
+Version `b0da6da2-966c-4630-868c-a2cbe1ba02e0`, routes
+`trydos.ramaaz.dev/api/proxy` and `/api/proxy-edge`.
+
+**How to tell which implementation answered:** the Next route emits
+`x-vercel-id`; the Worker does not. Before cutover `/api/proxy` carried
+`x-vercel-id: bom1::iad1::…`; after, it is absent. That is the check to run if
+anyone ever wonders whether a rollback took effect.
+
+Verified after cutover: `/api/proxy` returns 200 with
+`x-market-backend: gateway` and no `x-vercel-id`; the SSRF and OTP guards hold
+on the real path; `/` still 307s and `/gb-en` still 200s; `/api/auth/me` still
+carries `x-vercel-id`, confirming the other internal routes are untouched and
+only this one path is intercepted.
+
+**ROLLBACK** — delete the `/api/proxy` route in the Cloudflare dashboard
+(Workers & Pages → `trydos-proxy` → Settings → Domains & Routes). Traffic falls
+straight back to the Next route. No trydos deploy needed, effective in seconds.
+
+⚠️ **Seller-dashboard multipart was never exercised before cutover** (§3.13
+item 3). The Worker streams that body where the Next route buffered it via
+`formData()`. If product image uploads misbehave, suspect this first and roll
+back.
+
 ### 3.13 Proxy worker deployed to the shadow route (2026-08-24)
 
 `trydos-proxy` live on **`trydos.ramaaz.dev/api/proxy-edge`**. 11.26 KiB upload,

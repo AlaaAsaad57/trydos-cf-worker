@@ -9,12 +9,19 @@
   // Bound to the SAME hostname the app serves from — the auth cookies are
   // host-only, so a sibling subdomain would not receive MARKET-TOKEN.
   //
-  // SHADOW PATH ON PURPOSE. /api/proxy-edge is not served by Vercel, so this
-  // Worker owns it outright and the live /api/proxy is untouched. Compare the
-  // two with real cookies before changing this to /api/proxy — a big-bang
-  // cutover would put every authenticated request through untested code with
-  // route deletion as the only rollback.
+  // CUT OVER 2026-08-24. /api/proxy is now served by this Worker; the Next
+  // route of the same name still exists but is shadowed and no longer
+  // reachable on this hostname.
+  //
+  // ROLLBACK: delete the /api/proxy route in the Cloudflare dashboard
+  // (Workers & Pages → trydos-proxy → Settings → Domains & Routes), or remove
+  // it here and redeploy. Traffic falls straight back to the Next route with
+  // no deploy of trydos needed. Seconds, not minutes.
+  //
+  // /api/proxy-edge is kept so the Worker stays reachable under a stable name
+  // for testing after cutover.
   "routes": [
+    { "pattern": "trydos.ramaaz.dev/api/proxy", "zone_name": "ramaaz.dev" },
     { "pattern": "trydos.ramaaz.dev/api/proxy-edge", "zone_name": "ramaaz.dev" }
   ]
 
