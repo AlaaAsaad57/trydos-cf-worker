@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "trydos-proxy",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Bound to the SAME hostname the app serves from — the auth cookies are
+  // host-only, so a sibling subdomain would not receive MARKET-TOKEN.
+  // Not deployable until trydos.ramaaz.dev is orange-clouded.
+  "routes": [
+    { "pattern": "trydos.ramaaz.dev/api/proxy", "zone_name": "ramaaz.dev" }
+  ]
+
+  // Backend base URLs are secrets, set with `wrangler secret put`:
+  //   BACKEND_URL, GO_BACKEND_URL, ELASTIC_BACKEND_URL,
+  //   NEXT_PUBLIC_CHAT_BACKEND_URL, STORIES_BACKEND_URL,
+  //   COMMENT_BACKEND_URL, WALLET_BACKEND_URL
+  // Never commit their values — see CLAUDE.md §3.9.
+}
