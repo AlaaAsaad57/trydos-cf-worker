@@ -280,10 +280,30 @@ Cause is the legacy allowlist in `../../MediaServing/src/middleware/auth.js:49`,
 which returns early for `request.url === "/metrics"` before the API-key check.
 `/health` is allowlisted the same way, which is far less sensitive.
 
-**Status: deferred by the user 2026-08-24.** Both this and the exposed Grafana
-on `:3001` were raised and consciously set aside. Recorded here so the decision
-is visible rather than forgotten; the WAF rule in `infra/waf.tf` stays written
-and unapplied until someone revisits it. Do not re-raise as a new finding.
+**Status: REVERSED 2026-08-24 — the user asked for it to be closed.** It was
+deferred earlier that same day; that decision no longer stands for `/metrics`.
+The exposed Grafana on `:3001` IS still deferred and no rule here covers it.
+
+Closing it at the **edge**, not in the app, and the reason matters:
+
+- `/metrics` is served by the same Fastify app on the same port
+  (`src/middleware/metrics.js:153`, registered `src/app.js:241`).
+- Prometheus scrapes `host.docker.internal:4001`
+  (`observability/prometheus/targets/media-serving.json`), and
+  `docker-compose.prod.yml:73` maps `"4001:3000"` — so the scrape goes through
+  **the same `authHook`**. Removing `/metrics` from the allowlist would 401 the
+  scrape and break the dashboards, unless the Prometheus config also learns the
+  API key. That config is not in this repo.
+- Port 4001 is **not** publicly reachable — probed 2026-08-24, times out from
+  the internet, same as 3000. ⚠️ `docker-compose.prod.yml:71` carries an
+  "ADMIN: ensure port 4001 is open in the firewall" note that was never
+  actioned. Good. If anyone ever actions it, this WAF rule stops working and
+  the origin is directly exposed.
+
+So Cloudflare is the only public path to `/metrics`, and a WAF block closes it
+without Prometheus noticing. The app-level fix is still the durable one and is
+still worth doing — it just needs the Prometheus scrape config, which lives
+outside these repos.
 
 This leaks request rates, route labels, error counts and process internals —
 useful for sizing an attack and for inferring business volume. Two fixes, and

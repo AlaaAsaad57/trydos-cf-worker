@@ -1,10 +1,15 @@
-# WAF custom rules. Free plan allows FIVE; three are used and two are kept
-# spare on purpose -- on a five-rule budget, having no room to respond to an
-# incident is itself a risk.
+# WAF custom rules. Free plan allows FIVE.
 #
-# None of these are enforceable if the origin is reachable directly. Evidence
-# says it is not, but the mechanism is inferred rather than read. See
-# infra/README.md > Prerequisite.
+# ONLY `block_public_metrics` is enabled. The other two rules and the rate
+# limit below are written up but DISABLED -- they were never requested and each
+# has its own blast radius (blocking write methods can break a caller; a rate
+# limit can false-positive on carrier NAT in SY/IQ/LB). Enable them one at a
+# time, deliberately, each with its own plan.
+#
+# None of these are enforceable if the origin is reachable directly. Verified
+# 2026-08-24: ports 3000 and 4001 both time out from the internet, so
+# Cloudflare is the only public path in. Grafana on 3001 is still exposed and
+# is NOT covered by any rule here (CLAUDE.md §3.10).
 
 resource "cloudflare_ruleset" "media_waf" {
   zone_id = var.zone_id
@@ -30,7 +35,7 @@ resource "cloudflare_ruleset" "media_waf" {
     {
       ref         = "block_known_upload_auth_bypass"
       description = "Query-string bypass of the upload API-key check"
-      enabled     = true
+      enabled     = false # NOT REQUESTED -- see header note
       expression  = <<-EOT
         (${local.media_host_match})
         and (http.request.method ne "GET")
@@ -52,7 +57,7 @@ resource "cloudflare_ruleset" "media_waf" {
     {
       ref         = "block_writes_on_read_paths"
       description = "Read-only media routes accept only GET and HEAD"
-      enabled     = true
+      enabled     = false # NOT REQUESTED -- see header note
       expression  = "(${local.media_host_match}) and (http.request.method not in {\"GET\" \"HEAD\" \"OPTIONS\"}) and ${trimspace(local.media_read_paths)}"
       action      = "block"
     },
@@ -77,7 +82,7 @@ resource "cloudflare_ruleset" "media_rate_limit" {
     {
       ref         = "upload_flood"
       description = "Coarse flood ceiling on upload paths"
-      enabled     = true
+      enabled     = false # NOT REQUESTED -- see header note
       expression  = "(${local.media_host_match}) and (starts_with(http.request.uri.path, \"/upload\") or starts_with(http.request.uri.path, \"/gated\"))"
       action      = "block"
 
