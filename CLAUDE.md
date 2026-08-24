@@ -301,9 +301,39 @@ Closing it at the **edge**, not in the app, and the reason matters:
   the origin is directly exposed.
 
 So Cloudflare is the only public path to `/metrics`, and a WAF block closes it
-without Prometheus noticing. The app-level fix is still the durable one and is
-still worth doing — it just needs the Prometheus scrape config, which lives
-outside these repos.
+without Prometheus noticing.
+
+**The app-level fix must NOT use the API key — user decision, 2026-08-24.**
+Requiring `x-api-key` on `/metrics` was proposed and rejected. Do not propose
+it again. A scrape credential that is the same static key the upload routes
+use is a bad trade: it spreads the key to the monitoring stack, and it still
+leaves `/metrics` on the public app's port.
+
+**The correct fix is a separate internal listener, and MediaServing already
+has the pattern.** `src/worker.js:131-151` runs the worker's metrics on its own
+`http.createServer` bound to `WORKER_METRICS_PORT` (9091) — outside Fastify,
+so `authHook` never applies and no key is involved. The main app should do the
+same:
+
+1. Move the app's `/metrics` off Fastify onto its own listener, e.g.
+   `APP_METRICS_PORT=9090`. It already aggregates the worker's metrics
+   (`src/middleware/metrics.js:150-158`), so the aggregation moves with it.
+2. Delete the `/metrics` route from Fastify and drop `/metrics` from the
+   allowlist in `src/middleware/auth.js:49`. `/health` stays.
+3. Bind it to loopback in compose — `"127.0.0.1:9090:9090"`, not `"9090:9090"`
+   — so it is unreachable from outside the host even if a security-group rule
+   changes later. This is the part that makes it durable rather than another
+   ACL to maintain.
+4. Repoint the Prometheus target from `host.docker.internal:4001` to
+   `host.docker.internal:9090` in
+   `observability/prometheus/targets/media-serving.json`.
+
+After that the WAF rule becomes belt-and-braces rather than the only defence,
+and it can stay.
+
+⚠️ Not applied. This is a MediaServing change and §0 forbids editing that repo
+without instruction; it also needs a deploy and a Prometheus config change to
+land together.
 
 This leaks request rates, route labels, error counts and process internals —
 useful for sizing an attack and for inferring business volume. Two fixes, and
