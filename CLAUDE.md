@@ -228,20 +228,42 @@ Origin exposure, probed directly against the IP:
 | 3000 (app `PORT`) | Connection times out — firewalled ✅ |
 | 3001 (Grafana) | **Publicly reachable**, `302 → /login` ⚠️ |
 
-⚠️ **Unconfirmed and important:** whether the media app itself answers on that
-IP when the correct SNI is supplied — i.e. whether Cloudflare is bypassable.
-The test could not be completed from the agent sandbox, whose egress uses an
-HTTP `CONNECT` proxy that performs its own DNS resolution, so `curl --resolve`
-was ignored and the request still returned `cf-ray`. **Run this from a normal
-machine:**
+**Cloudflare is NOT trivially bypassable — resolved 2026-08-24.**
+
+`curl --resolve` is silently ignored when egress goes through an HTTP `CONNECT`
+proxy, which is why the first attempts kept returning `cf-ray` and looked like a
+bypass. `curl --connect-to` overrides the `CONNECT` target and gives a real
+answer:
 
 ```
-curl -sSI --resolve media.ramaaz.dev:443:13.233.124.226 https://media.ramaaz.dev/health
+curl -sSkI --connect-to media.ramaaz.dev:443:13.233.124.226:443 \
+     https://media.ramaaz.dev/health
+→ HTTP/2 404, server: Apache/2.4.67 (Debian)     # not the app
 ```
 
-No `cf-ray` in the response ⇒ the origin is directly reachable and every
-Cloudflare rule in this project is decoration until Authenticated Origin Pulls
-or an IP allowlist is in place (§4.2).
+Correct SNI, correct `Host`, straight to the origin IP — Apache answers **404**,
+not the media app's 200. Port 80 behaves the same. Yet Cloudflare gets a 200
+from this same origin, so the vhost does exist and is **discriminating by client
+IP**. The most likely mechanism is an Apache `Require ip` / `mod_remoteip` ACL
+restricted to Cloudflare ranges.
+
+Two caveats before treating this as settled:
+
+1. **The mechanism is inferred, not read.** Confirm it in the Apache vhost
+   config. If the media vhost is protected by an explicit CF-range ACL, good.
+   If it merely lacks a default-server binding, then adding any vhost later
+   silently opens the bypass.
+2. Without verification (`-k` removed) the TLS handshake fails, so the origin
+   presents a cert not publicly trusted — consistent with a Cloudflare Origin CA
+   certificate and Full (strict). Worth confirming the SSL/TLS mode is Full
+   (strict) and not Flexible.
+
+Authenticated Origin Pulls is still worth enabling: it replaces an IP-range ACL
+(which changes as Cloudflare adds ranges) with a client certificate.
+
+⚠️ Grafana on `:3001` is a **separate, genuinely exposed service** — it does not
+sit behind Apache or Cloudflare. It should move behind Cloudflare Access or the
+security group.
 
 ---
 
