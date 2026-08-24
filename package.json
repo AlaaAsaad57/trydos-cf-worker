@@ -5,7 +5,9 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --build"
+    "typecheck": "tsc --build",
+    "test:worker": "pnpm --filter @cf/proxy-worker test",
+    "test:all": "pnpm test && pnpm test:worker"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260823.1",
