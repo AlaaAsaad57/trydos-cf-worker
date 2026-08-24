@@ -694,14 +694,17 @@ cannot hold either workload. Free is for zone setup and DNS only.
 
 ### 4.3 Free-plan limits the docs do not state — learned from API errors
 
-All three were discovered only when `terraform apply` hit the real API. A plan
-succeeds against any of them, because the plan is client-side.
+All four were discovered only when `terraform apply` hit the real API. A plan
+succeeds against any of them, because the plan is client-side. They surfaced
+one at a time, each apply revealing the next — budget for that when adding
+rules on Free.
 
 | What was assumed | What the API actually says |
 |---|---|
 | Rate limiting is "IP-only", so `characteristics = ["ip.src"]` | **Error 20155** — `cf.colo.id` is *required*: "ratelimiting counting is processed at colocation level only". "IP-only" means no other *identity* characteristic (no header/cookie/JA3), not `ip.src` alone |
 | `mitigation_timeout` is free to choose | **"not entitled to use a mitigation timeout different from 10"** — Free is locked to 10s |
 | `http.request.method not in {...}` is valid | **Error 20127**, parse failure at the `not`. Wirefilter wants `not (http.request.method in {...})` — negate the whole comparison, not the operator |
+| `matches "^/image/upload/"` works for path prefixes | **"not entitled: the use of operator Matches is not allowed, a Business plan or a WAF Advanced plan is required"**. Regex is Business+. Anchored `^/prefix/` patterns map exactly onto `starts_with(http.request.uri.path, "/prefix/")`, so this costs nothing here — but any rule needing real regex is off the table until Business |
 
 Lesson, and it is the same one as §3.15: `terraform validate` and `terraform
 plan` both pass on all three. Only `apply` tells the truth about plan

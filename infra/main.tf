@@ -37,18 +37,22 @@ locals {
   #                            ?target= is read only in the video branch (:528)
   #   /file/upload/*           files.js:257
   #   /chat/file/*             chat.js:221
+  # NOTE: starts_with, not `matches`. The regex operator is Business-plan or
+  # WAF-Advanced only -- the API rejects it on Free with "not entitled: the use
+  # of operator Matches is not allowed". Every pattern here was an anchored
+  # ^/prefix/ regex, so starts_with is an exact substitute, not a workaround.
   media_paths_no_query = <<-EOT
-    (http.request.uri.path matches "^/image/upload/"
-     or http.request.uri.path matches "^/file/upload/"
-     or http.request.uri.path matches "^/chat/file/")
+    (starts_with(http.request.uri.path, "/image/upload/")
+     or starts_with(http.request.uri.path, "/file/upload/")
+     or starts_with(http.request.uri.path, "/chat/file/"))
   EOT
 
   # These reach the ?target= branch, so the query string stays in the key.
   # "media" is here because transform.js:347 resolves it to video for
   # video-looking paths.
   media_paths_video = <<-EOT
-    (http.request.uri.path matches "^/video/upload/"
-     or http.request.uri.path matches "^/media/upload/")
+    (starts_with(http.request.uri.path, "/video/upload/")
+     or starts_with(http.request.uri.path, "/media/upload/"))
   EOT
 
   # All read routes together. cache.tf needs them split by query-param
