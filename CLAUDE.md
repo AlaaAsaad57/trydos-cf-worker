@@ -202,6 +202,47 @@ From `../../MediaServing/.env.production` and the code:
   **not** look like real production. Confirm the true production hostnames with
   the user before configuring any DNS.
 
+### 3.10 Live infrastructure (probed 2026-08-24, and user-supplied DNS)
+
+Cloudflare zone `ramaaz.dev`, both records **Proxied**, both to the same origin:
+
+| Record | Type | Target |
+|---|---|---|
+| `media.ramaaz.dev` | A | `13.233.124.226` |
+| `media_server.ramaaz.dev` | A | `13.233.124.226` |
+
+- **`media.ramaaz.dev` already exists and works** — clean alias, no underscore,
+  verified `200` through Cloudflare. Prefer it for all new work; treat
+  `media_server.ramaaz.dev` as legacy to be retired once the apps stop
+  referencing it (`NEXT_PUBLIC_BASE_MEDIA_URL`,
+  `NEXT_PUBLIC_BASE_VIDEO_MEDIA_URL`, `NEXT_PUBLIC_MEDIA_SERVER_BASE_URL`,
+  `PUBLIC_BASE_URL`, `MEDIA_PUBLIC_BASE_URL`).
+- Origin `13.233.124.226` is AWS ap-south-1 and matches `GRAFANA_URL` in
+  `../../MediaServing/.env.production`.
+
+Origin exposure, probed directly against the IP:
+
+| Port | Result |
+|---|---|
+| 80 / 443 | **Publicly reachable.** `Server: Apache/2.4.67 (Debian)`, 404 for unmatched vhost |
+| 3000 (app `PORT`) | Connection times out — firewalled ✅ |
+| 3001 (Grafana) | **Publicly reachable**, `302 → /login` ⚠️ |
+
+⚠️ **Unconfirmed and important:** whether the media app itself answers on that
+IP when the correct SNI is supplied — i.e. whether Cloudflare is bypassable.
+The test could not be completed from the agent sandbox, whose egress uses an
+HTTP `CONNECT` proxy that performs its own DNS resolution, so `curl --resolve`
+was ignored and the request still returned `cf-ray`. **Run this from a normal
+machine:**
+
+```
+curl -sSI --resolve media.ramaaz.dev:443:13.233.124.226 https://media.ramaaz.dev/health
+```
+
+No `cf-ray` in the response ⇒ the origin is directly reachable and every
+Cloudflare rule in this project is decoration until Authenticated Origin Pulls
+or an IP allowlist is in place (§4.2).
+
 ---
 
 ## 4. Cloudflare constraints (Free plan, verified against CF docs)
@@ -274,24 +315,52 @@ cannot hold either workload. Free is for zone setup and DNS only.
   nginx `302 → /index.php` parking page. The domain is **not** expired; it was
   simply never pointed at the app.
 
+- ✅ **Production is `https://trydos-rust.vercel.app/`** (user-confirmed
+  2026-08-24). Not `dev.trydos.com`, despite `.env.production`. Middleware is
+  live: `GET /` → `307 /gb-en?no-country=true`, `x-vercel-id: bom1`.
+- ✅ **Only one `FormData` path transits `/api/proxy`**: seller-dashboard
+  product update, `services/sellerDashboard/index.ts:830-838` — `fetchData`
+  with `server: "market-dashboard"` and `body: formData`. Every other
+  `FormData` site fetches an origin directly and bypasses the proxy:
+  `services/auth.ts:945`, `services/order.ts:31`,
+  `services/sellerDashboard/index.ts:349`, `services/story.ts:96`,
+  `components/Chat/chatsFunctions.tsx:526` (all → media server `/gated/*`),
+  and `services/wallet/index.ts:260` (→ wallet backend). So the 100 MB cap
+  applies to product images only.
+- ✅ **HTML is not cacheable today, and `User-Data` is not the reason.**
+  `GET /gb-en` returns `cache-control: private, no-cache, no-store, max-age=0,
+  must-revalidate`, sets four cookies on the response (`country`, `lang`,
+  `language`, `userIP`), and carries `vary: rsc, next-router-state-tree,
+  next-router-prefetch, next-router-segment-prefetch`. `x-vercel-cache: MISS`.
+  Making HTML cacheable is therefore a **trydos change** (stop `no-store`, move
+  cookie-setting off the cached path), not a Cloudflare rule.
+
+### 🚧 Blocker: `*.vercel.app` cannot go behind Cloudflare
+
+Cloudflare can only proxy hostnames in a zone you control. `trydos-rust.vercel.app`
+is not one. Until a custom domain is attached to the Vercel project and its
+nameservers moved to Cloudflare:
+
+- **§2 step 2 (middleware + HTML caching) cannot start.**
+- **§2 step 3 (proxy worker) cannot start** — and is doubly blocked, because the
+  Worker must share a hostname with the host-only auth cookies (§3.4).
+- §2 step 1 (media) is unaffected: it lives on `ramaaz.dev`, already on
+  Cloudflare.
+
+The domain decision is deferred by the user as of 2026-08-24. While it stays
+deferred, media is the only workable track.
+
 ### Still open
 
-1. **Which hostname serves the real storefront today?** `.env.production` sets
-   `NEXT_PUBLIC_APP_URL=https://dev.trydos.com`, which currently serves the
-   parking page. The Vercel project is `trydos-front`
-   (`../trydos/.vercel/project.json`). Needs an answer from the user — every
-   DNS and cache decision depends on it.
-2. **Is `trydos.com` the intended production domain**, and is moving its
-   nameservers to Cloudflare in scope?
-3. What actually POSTs `multipart/form-data` through `/api/proxy`
-   (`route.ts:196`). `FormData` is constructed in `services/auth.ts:939`,
-   `services/order.ts:27,515`, `services/sellerDashboard/index.ts:337,444,585,757`,
-   `services/story.ts:82`, `services/wallet/index.ts:260`,
-   `components/Chat/chatsFunctions.tsx:521`. Not yet confirmed which of these
-   route via `fetchData` (and therefore the proxy) versus fetch directly.
-   Whatever does inherits the 100 MB cap.
-4. Whether HTML is cacheable for anonymous users in practice — needs a real look
-   at what varies on the `User-Data` cookie during render.
+1. **Custom domain for the Vercel project** — deferred by user. Unblocks steps
+   2 and 3; nothing else does.
+2. **Existing Cloudflare zone config** (cache rules, WAF, rate limits on
+   `ramaaz.dev`) — deferred by user. **Do not `terraform apply` against this
+   zone until its current state has been read.** Terraform will happily delete
+   rules it does not know about.
+3. Minor, unrelated: `REDIS_URL=65.0.21.24` in both apps' env files is a public
+   AWS ap-south-1 address that also serves as a NAT egress IP. Worth a sanity
+   check by someone with infra access; not part of this project.
 
 ---
 
