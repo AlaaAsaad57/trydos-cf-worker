@@ -315,15 +315,33 @@ Verified:
 | `media.ramaaz.dev/health` | `200`, unaffected by the scoped rule |
 | `trydosv2.ramaaz.dev` | still answering — the other ~60 Flexible origins are untouched |
 
-**The geo fix is confirmed working in production.** The response sets
-`userIP=65.0.21.24`, which is the real client address, not a Cloudflare edge
-IP. Without the `cf-connecting-ip` branch that cookie would now hold a
-Cloudflare PoP address. That is the `getClientIp` half proven live.
+**⚠️ The geo fix is NOT verified. An earlier claim here that it was is
+retracted.**
 
-The `getGeoCountry` half is **not** proven by that test: the probe originates
-in India, which is not a supported country, so `no-country=true` is the correct
-answer both before and after. Confirming it needs a request from a supported
-country (sy/lb/tr/iq).
+The reasoning was: the response sets `userIP=65.0.21.24`, the real client
+address rather than a Cloudflare edge IP, therefore the `cf-connecting-ip`
+branch must be live. **That does not follow.** `ipAddress()` from
+`@vercel/functions` reads `x-forwarded-for`, and Cloudflare populates that
+header with the real client IP anyway. The observation is consistent with the
+fix being deployed *and* with it not being deployed, so it distinguishes
+nothing.
+
+Neither half is confirmed:
+
+- `getClientIp` — unverifiable this way, per above.
+- `getGeoCountry` — the probe originates in India, which is not a supported
+  country, so `no-country=true` is the correct answer either way.
+
+**How to actually verify:** load the site from a supported country
+(sy/lb/tr/iq) and check the `location` header names that country rather than
+`gb-en?no-country=true`. That is the only test that separates the two cases.
+
+Open question this leaves: whether Vercel derives `x-vercel-ip-country` from
+the TCP peer (Cloudflare's edge — the failure this fix anticipates) or from
+`x-forwarded-for` (in which case geo may never have broken). Not established
+either way. Do not assume the fix was necessary, and do not assume it was not.
+
+The fix is committed on `main` as `e0472577`.
 
 Still true after the flip, and expected: `cf-cache-status: DYNAMIC`, HTML still
 `no-store` and still setting four cookies per response. Proxying changed
