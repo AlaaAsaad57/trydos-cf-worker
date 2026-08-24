@@ -374,8 +374,13 @@ deferred, media is the only workable track.
 
 ### Still open
 
-1. **Custom domain for the Vercel project** — deferred by user. Unblocks steps
-   2 and 3; nothing else does.
+1. **Custom domain for the Vercel project.** Hostname chosen 2026-08-24:
+   **`trydos.ramaaz.dev`** — a CNAME in the existing Cloudflare zone, so no
+   registrar or nameserver work is needed and `trydos.com` stays untouched
+   until launch. Rollout is grey-cloud → Vercel cert → ship the geo fix
+   (§5a) → orange-cloud. Until it is proxied, steps 2 and 3 stay blocked.
+   The proxy Worker will bind to a route pattern on this hostname, which is
+   what keeps the host-only auth cookies visible to it (§3.4).
 2. **Existing Cloudflare zone config** (cache rules, WAF, rate limits on
    `ramaaz.dev`) — deferred by user. **Do not `terraform apply` against this
    zone until its current state has been read.** Terraform will happily delete

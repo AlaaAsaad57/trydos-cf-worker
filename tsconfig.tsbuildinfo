@@ -1,1 +1,1 @@
-{"root":["./packages/shared/src/guards.test.ts","./packages/shared/src/guards.ts","./packages/shared/src/index.ts"],"version":"5.9.3"}
+{"root":["./packages/shared/src/cookies.test.ts","./packages/shared/src/cookies.ts","./packages/shared/src/guards.test.ts","./packages/shared/src/guards.ts","./packages/shared/src/index.ts"],"version":"5.9.3"}
