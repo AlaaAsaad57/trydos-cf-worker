@@ -393,6 +393,21 @@ deferred, media is the only workable track.
 
 ## 5a. Required trydos changes (identified here, applied there — not yet)
 
+### ✅ APPLIED 2026-08-24 — geo headers, fixed ahead of the DNS flip
+
+Both edits below are **applied in `../trydos` and passing, but not committed
+there** — review and deploy is the user's call. `tests/proxy.test.ts`: 108
+passing, up from 105, the three new ones covering CF-preferred, Vercel
+fallback, and `XX` unknown.
+
+- `proxy.ts` `getGeoCountry` — prefers `cf-ipcountry`, falls back to
+  `x-vercel-ip-country`.
+- `proxy.ts` `getClientIp` — prefers `cf-connecting-ip`, falls back to
+  `ipAddress(req)`.
+
+**This must be deployed before `trydos.ramaaz.dev` is orange-clouded.** The
+original problem, kept for context:
+
 ### ⛔ Geo headers break when the orange cloud goes on — fix BEFORE proxying
 
 `../trydos/proxy.ts:209` reads `x-vercel-ip-country`, which Vercel derives from
