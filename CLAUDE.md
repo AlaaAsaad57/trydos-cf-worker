@@ -296,6 +296,39 @@ both are worth doing:
    network, so this should not need public exposure at all — confirm how
    `observability/prometheus/targets` reaches it before changing.
 
+### 3.12 ✅ `trydos.ramaaz.dev` is live behind Cloudflare (2026-08-24)
+
+Rollout completed in this order, which is the order it has to happen in:
+
+1. Configuration Rule — `http.host eq "trydos.ramaaz.dev"` → SSL/TLS mode
+   **Strict**. Deployed past the dashboard's "this rule may not apply" warning,
+   which is expected while the record is still grey.
+2. trydos redeployed with the §5a geo fix.
+3. DNS record flipped to **Proxied**.
+
+Verified:
+
+| Check | Result |
+|---|---|
+| `GET /` | `307 → /gb-en?no-country=true`, `server: cloudflare`, `cf-ray` present |
+| `GET /gb-en` | `200` through Cloudflare — no redirect loop, so Strict is working |
+| `media.ramaaz.dev/health` | `200`, unaffected by the scoped rule |
+| `trydosv2.ramaaz.dev` | still answering — the other ~60 Flexible origins are untouched |
+
+**The geo fix is confirmed working in production.** The response sets
+`userIP=65.0.21.24`, which is the real client address, not a Cloudflare edge
+IP. Without the `cf-connecting-ip` branch that cookie would now hold a
+Cloudflare PoP address. That is the `getClientIp` half proven live.
+
+The `getGeoCountry` half is **not** proven by that test: the probe originates
+in India, which is not a supported country, so `no-country=true` is the correct
+answer both before and after. Confirming it needs a request from a supported
+country (sy/lb/tr/iq).
+
+Still true after the flip, and expected: `cf-cache-status: DYNAMIC`, HTML still
+`no-store` and still setting four cookies per response. Proxying changed
+nothing about caching — that remains the §5 trydos-side work.
+
 ### 3.11 Zone audit (read-only API token, 2026-08-24)
 
 Zone `ramaaz.dev` — id `df0581418328bcb0b4cde6d982f5c3ea`, status active, plan
