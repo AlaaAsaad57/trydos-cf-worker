@@ -1,4 +1,4 @@
-import { env, SELF } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { SERVICE_TOKENS } from "@cf/shared";
 
@@ -13,6 +13,12 @@ import { SERVICE_TOKENS } from "@cf/shared";
  *  Upstream is intercepted by the outbound service in vitest.config.ts, which
  *  echoes what it received. `fetchMock` was removed in vitest-pool-workers
  *  0.22 — do not reintroduce it. */
+
+// Mirrors the bindings in vitest.config.ts. Kept as literals rather than read
+// from `env` so the tests do not depend on ambient binding types.
+const CORE = "https://core.test/api/v1";
+const GATEWAY = "https://gateway.test/api/v1";
+const WALLET = "https://wallet.test";
 
 interface Echo {
   seenUrl: string;
@@ -184,7 +190,7 @@ describe("market backend routing", () => {
     );
     const echo = (await response.json()) as Echo;
 
-    expect(echo.seenUrl).toBe(`${env.GO_BACKEND_URL}/cart/add`);
+    expect(echo.seenUrl).toBe(`${GATEWAY}/cart/add`);
     expect(response.headers.get("x-market-backend")).toBe("gateway");
   });
 
@@ -192,7 +198,7 @@ describe("market backend routing", () => {
     const response = await SELF.fetch(proxyRequest({ url: "/orders/list" }));
     const echo = (await response.json()) as Echo;
 
-    expect(echo.seenUrl).toBe(`${env.BACKEND_URL}/orders/list`);
+    expect(echo.seenUrl).toBe(`${CORE}/orders/list`);
     expect(response.headers.get("x-market-backend")).toBe("core");
   });
 
@@ -203,7 +209,7 @@ describe("market backend routing", () => {
     );
     const echo = (await response.json()) as Echo;
 
-    expect(echo.seenUrl).toBe(`${env.BACKEND_URL}/cart/add`);
+    expect(echo.seenUrl).toBe(`${CORE}/cart/add`);
     expect(response.headers.get("x-market-backend")).toBe("core");
   });
 
@@ -213,7 +219,7 @@ describe("market backend routing", () => {
     );
     const echo = (await response.json()) as Echo;
 
-    expect(echo.seenUrl).toBe(`${env.WALLET_BACKEND_URL}/balance`);
+    expect(echo.seenUrl).toBe(`${WALLET}/balance`);
     // The dashboard/market marker is market-only.
     expect(response.headers.get("x-market-backend")).toBeNull();
   });
