@@ -347,6 +347,48 @@ Still true after the flip, and expected: `cf-cache-status: DYNAMIC`, HTML still
 `no-store` and still setting four cookies per response. Proxying changed
 nothing about caching — that remains the §5 trydos-side work.
 
+### 3.13 Proxy worker deployed to the shadow route (2026-08-24)
+
+`trydos-proxy` live on **`trydos.ramaaz.dev/api/proxy-edge`**. 11.26 KiB upload,
+3.53 KiB gzip, 4 ms startup. Version `779485c9-39b9-41aa-a73f-38e8e1db3f97`.
+All seven backend URLs set as secrets from `trydos/.env.production`.
+
+`/api/proxy` is untouched and still serving all real traffic.
+
+**Guards verified against the live deployment**, no session needed:
+
+| Case | Result |
+|---|---|
+| `GET` instead of `POST` | 405 |
+| Unknown service token | 503, generic failure body |
+| Empty target url | 400 |
+| `@evil.tld/x`, `//evil.tld/x`, `/../../internal/admin`, `/%2F%2F…`, `/%252F%252F…`, `orders/list` | 400 each |
+| `send_otp`, `send%5Fotp`, `send%255Fotp` | 403 each |
+
+**Shadow comparison against `/api/proxy`** — identical on every branch tested:
+
+| Request | Edge | Live |
+|---|---|---|
+| market `/web/home/startingSettings` | 200, gateway | 200, gateway |
+| market `/orders/list` | 404, core | 404, core |
+| market `/cart/cart_overview` | 401, gateway | 401, gateway |
+| elastic, wallet | 404 | 404 |
+
+The `startingSettings` payloads are **semantically identical** (parsed and
+compared leaf by leaf). They differ by one byte on the wire because the Next
+route re-serialises JSON via `NextResponse.json` while the Worker streams the
+upstream bytes unchanged — expected, and the cheaper behaviour.
+
+**Not yet covered, and needed before cutover:**
+
+1. An authenticated flow with a real `MARKET-TOKEN` — bearer injection is only
+   proven by unit and workerd tests, never against a live backend.
+2. The verified-user branch (`User-Data` with a valid phone → core even on an
+   allow-listed path).
+3. Seller-dashboard multipart, the one `FormData` path through the proxy
+   (§5.3). The Worker streams it rather than buffering via `formData()`.
+4. The Firebase `auth_token` body injection — the single non-streaming case.
+
 ### 3.11 Zone audit (read-only API token, 2026-08-24)
 
 Zone `ramaaz.dev` — id `df0581418328bcb0b4cde6d982f5c3ea`, status active, plan
