@@ -280,6 +280,11 @@ Cause is the legacy allowlist in `../../MediaServing/src/middleware/auth.js:49`,
 which returns early for `request.url === "/metrics"` before the API-key check.
 `/health` is allowlisted the same way, which is far less sensitive.
 
+**Status: deferred by the user 2026-08-24.** Both this and the exposed Grafana
+on `:3001` were raised and consciously set aside. Recorded here so the decision
+is visible rather than forgotten; the WAF rule in `infra/waf.tf` stays written
+and unapplied until someone revisits it. Do not re-raise as a new finding.
+
 This leaks request rates, route labels, error counts and process internals —
 useful for sizing an attack and for inferring business volume. Two fixes, and
 both are worth doing:
