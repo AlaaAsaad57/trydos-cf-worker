@@ -265,6 +265,32 @@ Authenticated Origin Pulls is still worth enabling: it replaces an IP-range ACL
 sit behind Apache or Cloudflare. It should move behind Cloudflare Access or the
 security group.
 
+### 🔴 `/metrics` is public — verified 2026-08-24
+
+`https://media.ramaaz.dev/metrics` returns the full Prometheus scrape to anyone,
+no API key:
+
+```
+curl https://media.ramaaz.dev/metrics
+→ 200, content-type: text/plain; version=0.0.4
+  process_cpu_user_seconds_total 1945.4467500000064 ...
+```
+
+Cause is the legacy allowlist in `../../MediaServing/src/middleware/auth.js:49`,
+which returns early for `request.url === "/metrics"` before the API-key check.
+`/health` is allowlisted the same way, which is far less sensitive.
+
+This leaks request rates, route labels, error counts and process internals —
+useful for sizing an attack and for inferring business volume. Two fixes, and
+both are worth doing:
+
+1. **Edge, now:** a WAF rule blocking `/metrics` (see `infra/waf.tf`). One rule
+   of the five available on Free.
+2. **App, properly:** require the API key for `/metrics`, or bind the metrics
+   listener to a private interface. Prometheus scrapes it from inside the
+   network, so this should not need public exposure at all — confirm how
+   `observability/prometheus/targets` reaches it before changing.
+
 ---
 
 ## 4. Cloudflare constraints (Free plan, verified against CF docs)
