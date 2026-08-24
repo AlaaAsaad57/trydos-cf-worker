@@ -296,6 +296,65 @@ both are worth doing:
    network, so this should not need public exposure at all — confirm how
    `observability/prometheus/targets` reaches it before changing.
 
+### 3.11 Zone audit (read-only API token, 2026-08-24)
+
+Zone `ramaaz.dev` — id `df0581418328bcb0b4cde6d982f5c3ea`, status active, plan
+**Free Website** (confirms every Free limit in §4.1).
+
+**🔴 `ssl = flexible`, zone-wide.** This is the single most important finding.
+
+Consequences, in order of importance:
+
+1. **`trydos.ramaaz.dev` must NOT be orange-clouded while this holds.** Flexible
+   makes Cloudflare fetch the origin over plain HTTP; Vercel unconditionally
+   redirects HTTP→HTTPS; Cloudflare follows it back into itself. Result is
+   `ERR_TOO_MANY_REDIRECTS` and the storefront is down. The §C rollout step is
+   blocked on this, not optional.
+2. **Every proxied backend on this zone currently receives Cloudflare traffic
+   over unencrypted HTTP.** There are ~60 proxied A records including
+   `trydos_develop`, `trydosv2`, `trydos_wallet_develop`, `trydoschatnest`,
+   `trydo_story`, `media`. The proxy injects `Authorization: Bearer <jwt>`
+   (§3.1), so those tokens cross the public internet in cleartext on the
+   Cloudflare→origin leg. This predates this project and is out of its scope,
+   but it should be raised with whoever owns the zone.
+
+**Do not "just switch it to Full (strict)".** The setting is zone-wide and ~60
+origins depend on it. Any origin without a working HTTPS listener breaks the
+moment it changes.
+
+**The safe unblock is a Configuration Rule scoped to one hostname.** SSL/TLS
+encryption mode is one of the 16 settings Configuration Rules can override, and
+Free includes 10 Configuration Rules. So: one rule matching
+`http.host eq "trydos.ramaaz.dev"` setting SSL to Full (strict), leaving every
+other backend on Flexible. ⚠️ Cloudflare's docs do not state whether the SSL
+setting specifically is Free-tier — unverified until the rule is actually
+created.
+
+**Other settings worth knowing:**
+
+| Setting | Value | Why it matters |
+|---|---|---|
+| `ip_geolocation` | **on** | `CF-IPCountry` will be present — the §5a geo fix works |
+| `browser_check` | **on** | Browser Integrity Check may challenge mobile/API clients once the app is proxied. Overridable per-path with a Configuration Rule |
+| `always_use_https` | off | |
+| `min_tls_version` | **1.0** | Weak, but zone-wide — changing it affects all ~60 origins |
+| `security_level` | medium | |
+| `cache_level` | aggressive | |
+| `browser_cache_ttl` | 14400 | Matches the origin's `max-age=14400` on media |
+| `rocket_loader`, `minify`, `polish`, `mirage` | off | Good — none of them will mangle app assets |
+
+**Rulesets: there are NO custom rules on this zone.** Only three managed
+rulesets. No custom WAF rules, no cache rules, no rate limiting, no transform
+rules. So `infra/` has a clean slate — nothing to import, nothing for Terraform
+to clobber. The §README warning about blind `apply` is now satisfied on the
+"read the current state" requirement.
+
+**DNS:** 122 records. `trydos.ramaaz.dev` is correctly grey-clouded
+(`proxied: false`). Note heavy duplication — most backends exist as both
+underscore and hyphen variants (`market_new` and `market-new`,
+`chating_staging_trydos` and `chating-staging-trydos`, …). Tech debt, not this
+project's to fix, but relevant if hostnames are ever migrated.
+
 ---
 
 ## 4. Cloudflare constraints (Free plan, verified against CF docs)
