@@ -12,7 +12,14 @@
 
 set -euo pipefail
 
-ENV_FILE="${1:-../../../trydos/.env.production}"
+# Resolve everything relative to THIS script, not the caller's cwd, so the
+# command works from the repo root or anywhere else. wrangler also needs to run
+# beside wrangler.jsonc, so cd there explicitly.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKER_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$WORKER_DIR"
+
+ENV_FILE="${1:-$WORKER_DIR/../../../trydos/.env.production}"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "env file not found: $ENV_FILE" >&2
