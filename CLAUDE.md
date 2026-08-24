@@ -504,6 +504,53 @@ upstream bytes unchanged — expected, and the cheaper behaviour.
    (§5.3). The Worker streams it rather than buffering via `formData()`.
 4. The Firebase `auth_token` body injection — the single non-streaming case.
 
+### 3.18 🔴 Media CANNOT move to Full (strict) — the origin has no cert for it
+
+Probed 2026-08-24, `openssl s_client -connect 13.233.124.226:443 -servername
+media.ramaaz.dev`:
+
+```
+issuer  = C = US, O = Let's Encrypt, CN = R3
+subject = CN = t-bot.trydos.tech
+notAfter= Apr 21 20:28:03 2024 GMT        <-- expired over two years ago
+SAN     = DNS:t-bot.trydos.tech            <-- no media.ramaaz.dev
+```
+
+Cert selection happens at the TLS handshake from SNI, **before** any HTTP-level
+IP ACL, so this is what Cloudflare would see too — it is not an artefact of
+probing from a non-Cloudflare address. Apache fell back to a default vhost for
+an unrelated site, which means **there is no HTTPS vhost for
+`media.ramaaz.dev` on the origin at all.**
+
+Consequences:
+
+- **Full (strict) fails** — wrong CN, no matching SAN, and expired. Cloudflare
+  would return 526 and media would be down.
+- **Full (non-strict) is also unsafe here** — it would accept the bad cert, but
+  the presented cert proves port 443 is not serving the media app, so requests
+  would likely 404.
+- **Flexible is currently the only mode that works.** That is why media works
+  today.
+
+So §5's "add a Configuration Rule for media like the one for trydos" is
+**blocked on a server-side change**, not a Cloudflare change. Required order:
+
+1. Issue a **Cloudflare Origin CA** certificate for `media.ramaaz.dev` (and
+   `media_server.ramaaz.dev` while it still exists).
+2. Add an Apache HTTPS vhost for those names using it.
+3. Verify port 443 serves the media app, not the default vhost.
+4. Only then add the Configuration Rule setting SSL to Full (strict).
+
+**Priority is lower than it first looks.** Flexible means the Cloudflare→origin
+leg is cleartext, but for media that payload is *public product images*. This
+is not the §3.11 concern, where proxied backends carry
+`Authorization: Bearer <jwt>` over the same cleartext leg. Fix those first if
+anything.
+
+⚠️ Also worth noting for whoever owns the box: the origin's default 443 vhost
+is serving a **two-year-expired** certificate for `t-bot.trydos.tech`. That is
+unrelated to this project but suggests other sites on that host may be broken.
+
 ### 3.17 ✅ APPLIED — media cache, WAF and rate limit are LIVE (2026-08-24)
 
 Applied with Terraform 1.15.9, provider cloudflare/cloudflare v5.23.0. Plan was
