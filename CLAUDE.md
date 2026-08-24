@@ -656,11 +656,26 @@ project's to fix, but relevant if hostnames are ever migrated.
 | Worker memory | 128 MB | Same on paid |
 | Request body | **100 MB (Free *and* Pro)** | Business 200 MB, Enterprise 500 MB |
 | WAF custom rules | 5 | Pro 20 |
-| Rate limiting rules | 1, 10s window, IP-only | |
+| Rate limiting rules | 1, 10s window, IP-only | See §4.3 — three of these were wrong |
 | Durable Objects | available, SQLite backend only | 100k req/day |
 
 **Workers Paid is $5/mo + $0.30/M requests and is assumed from day one.** Free
 cannot hold either workload. Free is for zone setup and DNS only.
+
+### 4.3 Free-plan limits the docs do not state — learned from API errors
+
+All three were discovered only when `terraform apply` hit the real API. A plan
+succeeds against any of them, because the plan is client-side.
+
+| What was assumed | What the API actually says |
+|---|---|
+| Rate limiting is "IP-only", so `characteristics = ["ip.src"]` | **Error 20155** — `cf.colo.id` is *required*: "ratelimiting counting is processed at colocation level only". "IP-only" means no other *identity* characteristic (no header/cookie/JA3), not `ip.src` alone |
+| `mitigation_timeout` is free to choose | **"not entitled to use a mitigation timeout different from 10"** — Free is locked to 10s |
+| `http.request.method not in {...}` is valid | **Error 20127**, parse failure at the `not`. Wirefilter wants `not (http.request.method in {...})` — negate the whole comparison, not the operator |
+
+Lesson, and it is the same one as §3.15: `terraform validate` and `terraform
+plan` both pass on all three. Only `apply` tells the truth about plan
+entitlements and expression syntax.
 
 ### 4.2 Structural constraints
 

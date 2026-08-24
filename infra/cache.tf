@@ -138,9 +138,23 @@ resource "cloudflare_ruleset" "media_cache" {
       # entry with JPEG, after which browsers get JPEG instead of WebP. That
       # costs ~25-35% more bytes and renders correctly.
       #
-      # Cost of enabling: every crawler request goes to origin. Crawler volume
-      # is small, so this is cheap -- but it is an optimisation, not a fix, and
-      # it spends one of the 10 cache rules.
+      # ⚠️ DO NOT ENABLE WITHOUT FIXING THE UA LIST FIRST.
+      #
+      # "whatsapp" is not only a crawler. WhatsApp's in-app browser puts
+      # "WhatsApp" in the User-Agent of a REAL person browsing the store, and
+      # Facebook's in-app browser is similar. Matching on it would send those
+      # shoppers past the cache to the origin on every single image, and
+      # in-app browsing is common in exactly the SY/IQ/LB markets this
+      # business serves. The rule would cost real users latency to save a few
+      # bytes for everyone else -- a bad trade.
+      #
+      # The same flaw exists at the origin: isSocialCrawler (transform.js:75)
+      # matches the WhatsApp in-app browser too, so those users already get
+      # JPEG instead of WebP. That is MediaServing's to fix, not this file's.
+      #
+      # To enable safely, first narrow the list to UAs that only ever belong
+      # to bots (facebookexternalhit, twitterbot, linkedinbot, ...) and drop
+      # the bare "whatsapp" / "pinterest" substrings.
       ref         = "media_crawler_bypass"
       description = "Bypass cache for social crawlers so UA-negotiated format is not shared"
       enabled     = false # optional optimisation -- see the note above

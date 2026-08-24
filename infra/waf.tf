@@ -1,10 +1,13 @@
 # WAF custom rules. Free plan allows FIVE.
 #
-# ONLY `block_public_metrics` is enabled. The other two rules and the rate
-# limit below are written up but DISABLED -- they were never requested and each
-# has its own blast radius (blocking write methods can break a caller; a rate
-# limit can false-positive on carrier NAT in SY/IQ/LB). Enable them one at a
-# time, deliberately, each with its own plan.
+# All three rules and the rate limit are enabled. Three of the five Free
+# custom rules are used; two are kept spare on purpose, because on a five-rule
+# budget having no room to respond to an incident is itself a risk.
+#
+# The rate limit is deliberately loose (100 req / 10s / IP on upload paths).
+# Carrier NAT in SY/IQ/LB puts many real customers behind one address, so a
+# tight IP limit false-positives on precisely this userbase. The authoritative
+# limits stay in the app, Redis-backed and per-identity (src/app.js:158-163).
 #
 # None of these are enforceable if the origin is reachable directly. Verified
 # 2026-08-24: ports 3000 and 4001 both time out from the internet, so
@@ -35,7 +38,7 @@ resource "cloudflare_ruleset" "media_waf" {
     {
       ref         = "block_known_upload_auth_bypass"
       description = "Query-string bypass of the upload API-key check"
-      enabled     = false # NOT REQUESTED -- see header note
+      enabled     = true
       expression  = <<-EOT
         (${local.media_host_match})
         and (http.request.method ne "GET")
@@ -57,8 +60,8 @@ resource "cloudflare_ruleset" "media_waf" {
     {
       ref         = "block_writes_on_read_paths"
       description = "Read-only media routes accept only GET and HEAD"
-      enabled     = false # NOT REQUESTED -- see header note
-      expression  = "(${local.media_host_match}) and (http.request.method not in {\"GET\" \"HEAD\" \"OPTIONS\"}) and ${trimspace(local.media_read_paths)}"
+      enabled     = true
+      expression  = "(${local.media_host_match}) and (not (http.request.method in {\"GET\" \"HEAD\" \"OPTIONS\"})) and ${trimspace(local.media_read_paths)}"
       action      = "block"
     },
   ]
@@ -82,15 +85,19 @@ resource "cloudflare_ruleset" "media_rate_limit" {
     {
       ref         = "upload_flood"
       description = "Coarse flood ceiling on upload paths"
-      enabled     = false # NOT REQUESTED -- see header note
+      enabled     = true
       expression  = "(${local.media_host_match}) and (starts_with(http.request.uri.path, \"/upload\") or starts_with(http.request.uri.path, \"/gated\"))"
       action      = "block"
 
       ratelimit = {
+        # cf.colo.id is REQUIRED by the API, not optional: rate-limit
+        # counting happens per colo. Removing it returns error 20155.
+        # "IP-only" on Free means no other IDENTITY characteristic (no
+        # header, cookie or JA3) -- it does not mean ip.src alone.
         characteristics     = ["ip.src", "cf.colo.id"]
         period              = 10
         requests_per_period = 100
-        mitigation_timeout  = 60
+        mitigation_timeout  = 10 # Free is locked to 10; 60 returns "not entitled"
       }
     },
   ]
