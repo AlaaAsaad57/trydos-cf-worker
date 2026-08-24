@@ -386,6 +386,36 @@ deferred, media is the only workable track.
 
 ---
 
+## 5a. Required trydos changes (identified here, applied there — not yet)
+
+### ⛔ Geo headers break when the orange cloud goes on — fix BEFORE proxying
+
+`../trydos/proxy.ts:209` reads `x-vercel-ip-country`, which Vercel derives from
+the **connecting IP**. Once Cloudflare proxies the hostname, the connecting IP
+is a Cloudflare edge IP, so every visitor resolves to the PoP's country and
+falls through to the `no-country=true` default (`proxy.ts:640-643`). Same
+problem at `proxy.ts:284`, where `ipAddress(req)` from `@vercel/functions`
+feeds the `userIP` cookie.
+
+Fix, which must land **before** the record is orange-clouded:
+
+- `getGeoCountry`: prefer `cf-ipcountry`, fall back to `x-vercel-ip-country`.
+  Cloudflare sets `CF-IPCountry` on proxied zones by default.
+- `ipAddress(req)`: prefer `cf-connecting-ip`, fall back to the current call.
+
+Both are small and backward-compatible — with a grey-clouded record the CF
+headers are simply absent and the existing behaviour holds, so the change is
+safe to ship ahead of the DNS flip.
+
+### Deferred
+
+- Migrate the five env vars off `media_server.ramaaz.dev` to
+  `media.ramaaz.dev` (§3.10).
+- Make HTML cacheable: stop sending `no-store`, move cookie-setting off the
+  cached path (§5).
+
+---
+
 ## 6. Working agreements
 
 - No secrets in this repo. `.dev.vars` and `.env*` are gitignored; use
