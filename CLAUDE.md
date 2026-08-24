@@ -504,6 +504,44 @@ upstream bytes unchanged — expected, and the cheaper behaviour.
    (§5.3). The Worker streams it rather than buffering via `formData()`.
 4. The Firebase `auth_token` body injection — the single non-streaming case.
 
+### 3.17 ✅ APPLIED — media cache, WAF and rate limit are LIVE (2026-08-24)
+
+Applied with Terraform 1.15.9, provider cloudflare/cloudflare v5.23.0. Plan was
+`3 to add, 0 to change, 0 to destroy` — nothing pre-existing was touched, which
+matches §3.11's finding that the zone had no custom rulesets.
+
+| Ruleset | Phase | Id |
+|---|---|---|
+| `media delivery cache` | `http_request_cache_settings` | `319e5667ae4040b8bba21ebb8f6b9e9d` |
+| `media protection` | `http_request_firewall_custom` | `eca8b23256f740948fc4b624fd5b2490` |
+| `media upload rate limit` | `http_ratelimit` | `ef020c4c6487456183bf8c9a64aea48e` |
+
+**Verified against production after apply:**
+
+| Check | Before | After |
+|---|---|---|
+| `/metrics`, both hostnames | 200 + full scrape | **403** ✅ |
+| `/health` | 200 | 200 — unaffected ✅ |
+| `.jfif` product image | `DYNAMIC`, never cached | `HIT` ✅ |
+| `?cb=902` on a URL warmed as `?cb=901` | MISS (own entry) | **HIT** — query string excluded from the key ✅ |
+| `?target=` on `/video/upload/` | 4 distinct variants | 4 distinct variants — `no target` 346145 B mp4, `snapshot` 10464 B webp, `preview` 109711 B mp4, `webp` 8818 B webp ✅ |
+| `POST /image/upload/...` | reached origin | **403** ✅ |
+| `POST /upload?x=/image/upload/` | bypassed the API key | **403** ✅ |
+| `POST /upload`, `POST /gated/ticket` | 401 from origin | 401 from origin — **not** over-blocked ✅ |
+
+The `?target=` row is the important one. It is the check that rule 2 did not
+collapse the video variants onto one cache entry; if it had, all four would
+return identical bytes.
+
+⚠️ **Measuring cache status needs repetition.** A colo holds many edge servers,
+each with its own cache, so single probes return MISS unpredictably even when
+caching works. `?cb=901` took 5 requests before it stuck. Judge by whether HIT
+appears at all across ~8 requests, never by one response.
+
+**ROLLBACK:** `terraform destroy -target=cloudflare_ruleset.<name>` in `infra/`,
+or delete the ruleset in the dashboard. To reopen `/metrics` specifically:
+`git revert e3821b9 && terraform apply`.
+
 ### 3.16 Media caching — probed live 2026-08-24
 
 Probes used real `GET`s. **`curl -I` is useless here** — Cloudflare does not
