@@ -47,10 +47,42 @@ export const readJsonCookie = <T = unknown>(
   name: string,
 ): T | string | null => {
   const raw = jar.get(name);
-  if (!raw) return null;
-  try {
-    return JSON.parse(decodeURIComponent(raw)) as T;
-  } catch {
-    return raw;
+  if (raw === undefined) return null;
+
+  // Decode until it parses, bounded — NOT a single decode.
+  //
+  // The original writes these with encodeURIComponent(JSON.stringify(v)) and
+  // hands the result to Next's cookie serializer, which encodes again. On the
+  // way back Next's reader decodes once and getSecureCookie decodes a second
+  // time, so Next tolerates a double-encoded value. A single decode here does
+  // not, and the failure is silent and expensive: JSON.parse throws, the raw
+  // string is returned, hasValidPhone finds no phone, and a verified shopper
+  // is quietly demoted to a guest and routed to the gateway.
+  //
+  // Verified against production 2026-08-24: with a double-encoded User-Data,
+  // Next answered `core` and this function's single-decode version answered
+  // `gateway`.
+  //
+  // Parse BEFORE decoding again, so a value whose JSON legitimately contains
+  // percent sequences is never over-decoded.
+  let current = raw;
+  for (let pass = 0; pass < 5; pass += 1) {
+    try {
+      return JSON.parse(current) as T;
+    } catch {
+      // not JSON yet — try peeling one more layer
+    }
+    let next: string;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      break; // malformed escape; fail open below
+    }
+    if (next === current) break;
+    current = next;
   }
+
+  // Fails open to the raw string rather than throwing, which is what the
+  // original does and what keeps routing degrading to "guest" instead of 500.
+  return raw;
 };

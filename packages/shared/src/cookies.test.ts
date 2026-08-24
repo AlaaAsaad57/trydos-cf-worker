@@ -65,4 +65,35 @@ describe("readJsonCookie", () => {
     const jar = parseCookies("User-Data=%E0%A4%A");
     expect(readJsonCookie(jar, "User-Data")).toBe("%E0%A4%A");
   });
+
+  // Regression: this is how the cookie actually arrives in production. The
+  // value is encodeURIComponent'd by setSecureCookieJSON and then encoded
+  // again by Next's cookie serializer. A single decode leaves "%7B%22id%22…",
+  // JSON.parse throws, and a verified shopper is silently demoted to a guest
+  // and routed to the gateway instead of core.
+  it("parses a double-encoded value, as production actually sends it", () => {
+    const profile = { id: 18081, phone: "+963937288307", is_verified: true };
+    const doubleEncoded = encodeURIComponent(
+      encodeURIComponent(JSON.stringify(profile)),
+    );
+    const jar = parseCookies(`User-Data=${doubleEncoded}`);
+    expect(readJsonCookie(jar, "User-Data")).toEqual(profile);
+  });
+
+  it("parses an unencoded JSON value too", () => {
+    const jar = parseCookies('User-Data={"phone":"+963900000000"}');
+    expect(readJsonCookie(jar, "User-Data")).toEqual({
+      phone: "+963900000000",
+    });
+  });
+
+  // Guards the decode loop against over-decoding: a string value that itself
+  // contains percent sequences must survive intact once the JSON parses.
+  it("stops decoding as soon as the value parses", () => {
+    const withPercents = { note: "50%25 off", path: "/a%2Fb" };
+    const jar = parseCookies(
+      `User-Data=${encodeURIComponent(JSON.stringify(withPercents))}`,
+    );
+    expect(readJsonCookie(jar, "User-Data")).toEqual(withPercents);
+  });
 });

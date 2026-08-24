@@ -347,6 +347,46 @@ Still true after the flip, and expected: `cf-cache-status: DYNAMIC`, HTML still
 `no-store` and still setting four cookies per response. Proxying changed
 nothing about caching — that remains the §5 trydos-side work.
 
+### 3.15 🐛 Fixed: double-encoded `User-Data` demoted verified users to guests
+
+**Symptom:** a logged-in, phone-verified shopper got `x-market-backend: gateway`
+on allow-listed paths, where the original Next route gave `core`. Reported from
+the browser, reproduced exactly.
+
+**Cause.** `User-Data` arrives **double-encoded** on the wire — the real value
+starts `%257B%2522id%2522…`, i.e. `%25` → `%`, so `%257B` → `%7B` → `{`.
+`setSecureCookieJSON` (`tokenManager.ts:254`) does
+`encodeURIComponent(JSON.stringify(v))` and hands that to Next's cookie
+serializer, which encodes again. Coming back, Next's reader decodes once and
+`getSecureCookie` decodes a second time, so Next tolerates it. The Worker's
+`readJsonCookie` decoded **once**, `JSON.parse` threw, the raw string was
+returned, `hasValidPhone` found no `phone`, and the shopper was silently
+treated as a guest.
+
+Silent is the operative word: no error, no log, just the wrong backend.
+
+**Proof, against production:**
+
+| `User-Data` encoding | Worker (before fix) | Next |
+|---|---|---|
+| single | core | core |
+| double — *what production actually sends* | **gateway** ❌ | core |
+
+**Fix.** `readJsonCookie` now decodes until the value parses, bounded at five
+passes, and **parses before decoding again** so a value whose JSON legitimately
+contains percent sequences is never over-decoded. Verified after deploy: the
+real cookie gives `core` on `/cart/add`, `/customer/info` and
+`/web/home/startingSettings`, matching Next on all three.
+
+Regression tests in `cookies.test.ts` cover double-encoded, single-encoded,
+unencoded, and the over-decoding guard.
+
+**Lesson for the rest of this port.** Synthetic fixtures agreed with the
+original on all 8 routing combinations and still missed this, because the
+fixture was single-encoded and production is not. Where a value's encoding is
+decided by framework code rather than by us, test with a **captured production
+value**, not a constructed one.
+
 ### 3.14 ✅ CUT OVER — the Worker serves `/api/proxy` (2026-08-24)
 
 Version `b0da6da2-966c-4630-868c-a2cbe1ba02e0`, routes
