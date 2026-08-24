@@ -8,3 +8,13 @@ dist/
 !.env.example
 *.log
 .DS_Store
+
+# Terraform — state holds resource ids and can hold secrets; never commit it.
+# .terraform.lock.hcl IS committed on purpose (provider version pinning).
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfvars
+infra/.terraform.tfstate.lock.info
+infra/tfplan
+infra/.cf-token

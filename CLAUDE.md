@@ -454,6 +454,115 @@ upstream bytes unchanged — expected, and the cheaper behaviour.
    (§5.3). The Worker streams it rather than buffering via `formData()`.
 4. The Firebase `auth_token` body injection — the single non-streaming case.
 
+### 3.16 Media caching — probed live 2026-08-24
+
+Probes used real `GET`s. **`curl -I` is useless here** — Cloudflare does not
+serve HEAD from cache, so every HEAD reports `MISS` and the first round of
+probing looked like nothing was cached at all.
+
+**Baseline is healthier than §3.10 recorded.** `/image/upload/...` returns
+`cf-cache-status: HIT` with `age:` climbing, on both media hostnames. The two
+hostnames hold separate cache entries, as expected — host is part of the
+default key.
+
+⚠️ **§3.10's `max-age=14400` is stale.** The origin now sends
+`cache-control: public, max-age=31536000, s-maxage=31536000, immutable`. A
+poisoned or wrong entry therefore persists for a year, which raises the cost of
+every bug below.
+
+The storefront still emits **`media_server.ramaaz.dev`**, not `media.` — so any
+rule must cover both hostnames until the five env vars move (§5a).
+
+#### ⚠️ Crawler/browser format divergence — real, but NOT the link-preview bug
+
+**A first version of this section claimed this "silently breaks Facebook/
+WhatsApp link previews for every product". That was wrong and is retracted.**
+The claim was made before reading `utils/server/helpers.ts`. og:image URLs are
+already safe; see below.
+
+The mechanism is real and reproducible. `transform.js:406` picks the image
+format from the User-Agent — `isSocialCrawler()` at `transform.js:75-80` sends
+JPEG to Facebook, WhatsApp, Telegram et al., WebP to everyone else. The
+response carries only `vary: Origin`, and Cloudflare does not vary on
+User-Agent, so on an `f_auto` URL **whichever request warms the entry decides
+the format for everybody.** Reproduced against production, both directions,
+same URL each time:
+
+| Warmed by | Then requested by | Result |
+|---|---|---|
+| browser | `facebookexternalhit/1.1` | `image/webp`, **HIT** |
+| `WhatsApp/2.23` | browser | `image/jpeg`, **HIT** |
+
+**Why link previews are nevertheless fine.** Social crawlers fetch the og:image
+URL, and every og:image URL is built by `buildOgImageUrl`
+(`utils/server/helpers.ts:69-77`), which already rewrites the transform segment
+to `w_1200,h_630,c_pad/f_jpg/q_90`. An explicit `f_jpg` means the format is
+explicitly requested, so `transform.js:406`'s crawler-safe default never runs
+and the User-Agent is irrelevant. Verified live — that URL returns
+`image/jpeg` for Chrome, `facebookexternalhit` and `WhatsApp` alike.
+
+All three og:image sites are covered:
+
+- `serverRequests/product.tsx:325` — `buildOgImageUrl(GetImageUrl(...))`
+- `serverRequests/meta/listing.tsx:270` — same helper
+- `serverRequests/meta/home.ts:41` — a static `/opengraph-image.png` on the
+  trydos origin, not a media URL at all
+
+**What is actually left.** Only `f_auto` URLs diverge, and only crawlers that
+scrape in-page images rather than og:image (Pinterest,
+Google-InspectionTool) can warm one. The realistic consequence is a browser
+being served JPEG where it could have had WebP — roughly 25-35% more bytes,
+renders correctly. That is a payload regression, **not** a correctness bug, and
+it does not justify treating rule 3 as urgent.
+
+#### 🔴 `.jfif` product images are never edge-cached
+
+`.jfif` is not in Cloudflare's default cacheable-extension list, so those URLs
+return `cf-cache-status: DYNAMIC` and hit EC2 on **every** request. Real
+product images use the extension (`product/1784451828831147.jfif`, live on the
+storefront). An explicit `cache = true` cache rule overrides the extension list
+and fixes it — this is probably the largest single origin-traffic win available.
+
+#### 🔴 Custom cache keys are ENTERPRISE-ONLY — the old `cache.tf` was unbuildable
+
+Cloudflare's cache-key availability table reads `Query string | No | No | No |
+Yes`. Free, Pro *and* Business get only:
+
+| Cache Key option | Free |
+|---|---|
+| Ignore query string (all or nothing) | ✅ |
+| Sort query string | ✅ |
+| Cache deception armor | ✅ |
+| Cache by device type | ✅ |
+| "No query parameters except `target`" | ❌ **Enterprise** |
+
+The original `cache.tf` was built entirely on `query_string.include =
+["target"]`. It could never have been applied. Rewritten to split the read
+paths by whether the origin reads a query parameter at all:
+
+- **Query string ignored** — `/image/upload/`, `/file/upload/`, `/chat/file/`.
+  Verified no handler reads a query param: `target` is read only in the video
+  branch (`transform.js:528`), which `resourceType: "image"` never reaches
+  (`transform.js:351,372`); `chat.js` has zero `.query` reads; the only
+  `.query` in `files.js` is `folder` at `:155`, inside the POST
+  `/upload/excel` handler, not the GET at `:257`.
+- **Query string preserved** — `/video/upload/`, `/media/upload/`. trydos
+  really does use `?target=`: `StoryViewer.tsx:377` (`story`),
+  `services/story.ts:291` (`snapshot`), `utils/server/helpers.ts:210`
+  (`preview`). Ignoring it would serve a snapshot where a preview was asked
+  for. `media` is included because `transform.js:347` resolves it to video.
+
+#### Query-param cache busting is real, but milder than the old file claimed
+
+`?cb=1`, `?cb=2`, `?cb=3` each produce an edge `MISS` today. But the origin
+answers them `x-cache: HIT` from **its own** cache, so **no fresh Sharp/ffmpeg
+run happens**. The cost is EC2 egress and request handling, not origin CPU. The
+old `cache.tf` comment asserting "three Sharp/ffmpeg invocations" was wrong.
+
+Closed on the image/file/chat paths by the ignore-query-string rule above.
+**Accepted on the video paths** — it cannot be closed there without an
+Enterprise cache key.
+
 ### 3.11 Zone audit (read-only API token, 2026-08-24)
 
 Zone `ramaaz.dev` — id `df0581418328bcb0b4cde6d982f5c3ea`, status active, plan
@@ -674,6 +783,17 @@ Fix, which must land **before** the record is orange-clouded:
 Both are small and backward-compatible — with a grey-clouded record the CF
 headers are simply absent and the existing behaviour holds, so the change is
 safe to ship ahead of the DNS flip.
+
+### ✅ Already done — og:image format is pinned
+
+Recorded here only to stop it being "discovered" again. An earlier revision of
+this file proposed pinning `f_jpg` in og:image URLs as a trydos change. **It is
+already implemented**: `buildOgImageUrl` (`utils/server/helpers.ts:69-77`)
+rewrites the transform segment to `w_1200,h_630,c_pad/f_jpg/q_90` and is used
+at `serverRequests/product.tsx:325` and `serverRequests/meta/listing.tsx:270`.
+Covered by tests at `tests/utils/server/helpers.test.ts:167-190`.
+
+No trydos change is required for §3.16.
 
 ### Deferred
 

@@ -34,19 +34,30 @@ cause.
 
 ### Cache (`cache.tf`)
 
-The important part is the **cache key**, not the TTL. Image transforms are
-expressed in the path (`/image/upload/w_200/foo.jpg`) and video variants in a
-single `target` query parameter (`src/api/transform.js:200`). If the cache key
-includes the whole query string, then `?x=1`, `?x=2`, `?x=3` are three separate
-misses, and each one is a Sharp or ffmpeg invocation on the origin EC2 box.
-That is a trivially cheap way for anyone to burn origin CPU.
+**Rewritten 2026-08-24 after probing the live zone.** The first draft keyed the
+cache on path + `target`. That is an **Enterprise-only** feature — Free, Pro and
+Business get only an all-or-nothing "ignore query string" toggle — so the draft
+could never have been applied. Full evidence in CLAUDE.md §3.16.
 
-So the key is path + `target` only, and everything else in the query string is
-ignored. At 1M visitors this matters more than any TTL choice.
+Four rules, out of the 10 Free allows:
 
-Origin already sends `cache-control: max-age=14400`, so edge TTL respects the
-origin rather than overriding it — changing that is a separate decision that
-needs to know whether media filenames are content-addressed.
+| # | Rule | Why |
+|---|---|---|
+| 1 | Cache `/image/upload/`, `/file/upload/`, `/chat/file/`, query string ignored | Verified none of these handlers read a query param. Also forces caching of `.jfif`, which Cloudflare's default extension list misses — those hit EC2 on every request today |
+| 2 | Cache `/video/upload/`, `/media/upload/`, query string kept | `?target=story\|snapshot\|preview` selects the variant. Ignoring it would serve the wrong bytes |
+| 3 | Bypass cache for social-crawler UAs — **disabled by default** | Optional. The origin picks JPEG vs WebP off the User-Agent without varying on it, so an `f_auto` entry serves one format to all. Does **not** affect link previews — og:image already pins `f_jpg`. Enable only if the payload cost is worth a rule |
+| 4 | Never cache `/upload` or `/gated` | Write paths |
+
+Rule 1 is the one that pays: it closes the query-string cache-bust on the
+highest-volume paths and forces `.jfif` to cache at all. Rule 3 was written up
+as urgent in an earlier revision on the belief that it fixed broken social link
+previews — **that was wrong.** trydos already pins `f_jpg` in og:image URLs
+(`utils/server/helpers.ts:69-77`), so previews were never affected. It ships
+disabled. See CLAUDE.md §3.16.
+
+Edge TTL respects the origin, which now sends
+`max-age=31536000, s-maxage=31536000, immutable` (not the 14400 recorded
+earlier).
 
 ### WAF (`waf.tf`)
 
