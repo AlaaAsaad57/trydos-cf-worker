@@ -957,6 +957,28 @@ No trydos change is required for §3.16.
 
 ---
 
+## 5b. Handover — what is left
+
+The remaining work is written up as one file per item in the repo root, with
+[REMAINING.md](REMAINING.md) as the index:
+
+| # | Item | Owner | File |
+|---|---|---|---|
+| 1 | Media on Flexible SSL — blocked, origin has no cert (§3.18) | server admin | `STEP-1-media-ssl.md` |
+| 2 | `/metrics` open inside the network — separate listener, no API key (§3.10) | MediaServing | `STEP-2-metrics-listener.md` |
+| 3 | Retire `media_server.ramaaz.dev` (§3.10) | trydos + MediaServing | `STEP-3-retire-media-server-host.md` |
+| 4 | Origin lock-down: Grafana `:3001` exposed, AOP not enabled (§3.10, §3.11) | server admin | `STEP-4-origin-lockdown.md` |
+
+Nothing on that list can be finished from this repo — every item is a
+server-side change or an app change in `../trydos` / `../../MediaServing`,
+which §0 forbids editing from here.
+
+Order matters in one place: **item 4 comes before item 1.** Authenticated
+Origin Pulls is a TLS client-certificate mechanism, so it needs the HTTPS
+origin leg that item 1 builds — but item 1 is only worth doing once the origin
+is genuinely locked to Cloudflare, which is item 4b. Read both files before
+starting either.
+
 ## 6. Working agreements
 
 - No secrets in this repo. `.dev.vars` and `.env*` are gitignored; use
