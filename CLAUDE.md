@@ -698,6 +698,103 @@ Closed on the image/file/chat paths by the ignore-query-string rule above.
 **Accepted on the video paths** — it cannot be closed there without an
 Enterprise cache key.
 
+### 3.19 ✅ CUT OVER — the Worker serves `/ingest/*` (PostHog) (2026-08-25)
+
+`trydos-ingest`, version `8d7eb772-9698-4eed-b617-af5a40f2ccbc`, routes
+`trydos.ramaaz.dev/ingest/*` and `/ingest-edge/*`. 4.10 KiB upload, 1.73 KiB
+gzip, 4 ms startup. A **separate Worker** from `trydos-proxy` per §6 — this is
+the highest-volume path in the app and must not share an isolate, or a failure
+domain, with the code that handles `MARKET-TOKEN`.
+
+Ported from `../trydos/app/ingest/[...path]/route.ts` (an edge route handler,
+**not** a `next.config` rewrite). Rules live in
+`packages/shared/src/ingest.ts`; the handler is `workers/ingest/src/index.ts`.
+
+**Why it was worth moving.** Every captured event, autocapture hit and
+feature-flag call was one Vercel edge invocation plus transfer both ways — the
+§1 cost lines. `../trydos/utils/posthog.ts:67-72` records that session replay
+was **switched off specifically to cut that bill**: "session replay funnels a
+continuous stream of chunks through the /ingest edge proxy (one edge invocation
++ data transfer per chunk), which dominated the bill." That constraint is gone.
+
+**What the proxy does, unchanged from the Next route:**
+
+- `/static/*` → `eu-assets.i.posthog.com`, everything else →
+  `eu.i.posthog.com` (`route.ts:51-54`). Whole-segment match, so `staticfoo`
+  is correctly an ingestion path.
+- Strips `cookie, host, connection, content-length, transfer-encoding,
+  accept-encoding` on the way up (`route.ts:26-33`).
+- Strips `content-encoding, content-length, transfer-encoding, connection,
+  set-cookie` on the way back (`route.ts:39-45`).
+- Upstream unreachable → 502, empty body, never a throw (`route.ts:72`).
+
+**Two deliberate differences from the Next route:**
+
+1. **`X-Forwarded-For` is set explicitly from `cf-connecting-ip`.** On Vercel
+   the header happened to be populated and was copied along; nothing does that
+   for us in a Worker, and the failure would be silent — PostHog would
+   geolocate every event to whichever Cloudflare PoP served it. Same class of
+   bug as the §5a geo fix.
+2. **The body is streamed** rather than buffered via `arrayBuffer()`, and
+   `/static/*` fetches carry `cf: { cacheEverything: true }` with no `cacheTtl`
+   so PostHog's own `public, max-age=14400` governs.
+
+**Verified against production, shadow route first then after cutover:**
+
+| Check | Result |
+|---|---|
+| `/ingest/static/array.js` | 200, **264388 bytes byte-identical** to the Next route, `x-vercel-id` absent |
+| `/ingest/static/recorder.js` | 200 |
+| `POST /ingest/flags/?v=2` with the real project key | 200, same JSON shape as Next (only `requestId` / `evaluatedAt` differ — per-request nonces) |
+| **16 KB cookie** | **200 through us, `400` direct to `eu.i.posthog.com`** — the discriminator that proves the cookie is actually stripped |
+| 8.5 KB cookie | 200 everywhere *including direct* — see the caveat below |
+| `PUT` | 405, `allow: GET, HEAD, POST, OPTIONS` |
+| `OPTIONS` | 200, forwarded rather than answered locally |
+| asset cache ×6 | `HIT HIT HIT HIT REVALIDATED HIT` |
+| `POST /ingest/flags/` ×3 | `DYNAMIC DYNAMIC DYNAMIC` — events are never cached ✅ |
+| `/api/proxy` | still the Worker (no `x-vercel-id`) ✅ |
+| `/api/auth/me` | still Next (`x-vercel-id` present) ✅ |
+| `/gb-en`, `/` | 200, 307 — storefront untouched ✅ |
+
+⚠️ **The original 400 could not be reproduced at the size the Next route's
+comment implies.** `route.ts:6-10` says a logged-in user's jar "easily exceeds
+~8 KB" and PostHog answers 400. At 8.5 KB PostHog answered **200** on a direct
+call today; the threshold measured on 2026-08-25 is between 8.5 KB and 16 KB.
+The proxy is still right — and stripping our auth cookies before they reach a
+third party is worth doing on its own — but do not cite ~8 KB as the limit.
+
+⚠️ **`X-Forwarded-For` is covered by tests, NOT verified in production.**
+Confirming it needs `$geoip_country_code` on a real event in the PostHog UI,
+which is not reachable from here. Do not record it as verified until someone
+looks. (§3.12 is the standing lesson on why that distinction matters.)
+
+**Parity note:** a bare `/ingest` (no trailing path) is not matched by the
+`/ingest/*` route pattern, so it falls through to Vercel and Next renders it as
+a `[lang]` segment — `x-matched-path: /[lang]`, 200 HTML. **The live `/ingest`
+did exactly the same before the cutover**, so this is parity, not a regression.
+
+**Tests:** 18 unit tests in `packages/shared/src/ingest.test.ts`, 12 handler
+tests in `workers/ingest/test/ingest.worker.test.ts` (workerd). Repo total is
+now 101 unit + 30 proxy-worker + 12 ingest-worker.
+
+One design note worth keeping: `proxyIngest()` takes the fetcher as a
+parameter. That seam exists for exactly one test — miniflare's outbound service
+turns a thrown error into a 500 **response**, not a rejected `fetch`, so the
+"analytics must never throw into the app" contract cannot be exercised any
+other way. Production always uses the global `fetch`.
+
+**ROLLBACK** — delete the `/ingest/*` route in the Cloudflare dashboard
+(Workers & Pages → `trydos-ingest` → Settings → Domains & Routes), or remove it
+from `workers/ingest/wrangler.jsonc` and redeploy. Traffic falls straight back
+to the Next route, which is still deployed. No trydos deploy needed, effective
+in seconds.
+
+⚠️ **No rate limit covers `/ingest/*`.** It is an unauthenticated relay to
+PostHog — anyone can POST arbitrary events into the project. That was equally
+true of the Next route, so this is not a regression, but it is now cheap to
+abuse. Free has exactly one rate-limiting rule and `media upload rate limit`
+spent it (§3.17). Fixing it means Pro, or giving up the media limit.
+
 ### 3.11 Zone audit (read-only API token, 2026-08-24)
 
 Zone `ramaaz.dev` — id `df0581418328bcb0b4cde6d982f5c3ea`, status active, plan
@@ -968,6 +1065,7 @@ The remaining work is written up as one file per item in the repo root, with
 | 2 | `/metrics` open inside the network — separate listener, no API key (§3.10) | MediaServing | `STEP-2-metrics-listener.md` |
 | 3 | Retire `media_server.ramaaz.dev` (§3.10) | trydos + MediaServing | `STEP-3-retire-media-server-host.md` |
 | 4 | Origin lock-down: Grafana `:3001` exposed, AOP not enabled (§3.10, §3.11) | server admin | `STEP-4-origin-lockdown.md` |
+| 5 | PostHog `/ingest` follow-ups: re-enable replay, confirm geo-IP, retire the dead Next route (§3.19) | trydos | `STEP-5-posthog-ingest-followups.md` |
 
 Nothing on that list can be finished from this repo — every item is a
 server-side change or an app change in `../trydos` / `../../MediaServing`,

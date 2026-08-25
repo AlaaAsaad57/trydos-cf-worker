@@ -26,6 +26,12 @@ importers:
 
   packages/shared: {}
 
+  workers/ingest:
+    dependencies:
+      '@cf/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+
   workers/proxy:
     dependencies:
       '@cf/shared':

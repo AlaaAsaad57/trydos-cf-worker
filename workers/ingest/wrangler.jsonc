@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "trydos-ingest",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // A SEPARATE Worker from trydos-proxy on purpose (CLAUDE.md §6). This is the
+  // highest-volume path in the app — one request per captured event — and it
+  // must not share an isolate, or a failure domain, with the code that handles
+  // MARKET-TOKEN.
+  //
+  // CUT OVER 2026-08-25. /ingest/* is now served by this Worker; the Next
+  // route of the same name (trydos/app/ingest/[...path]/route.ts) still exists
+  // but is shadowed and no longer reachable on this hostname.
+  //
+  // How to tell which implementation answered: the Next route emits
+  // x-vercel-id, this Worker does not. Same tell as CLAUDE.md §3.14.
+  //
+  // /ingest-edge/* is the shadow route used to compare the two before cutover.
+  // It is kept so the Worker stays reachable under a stable name for testing.
+  //
+  // ROLLBACK: delete the /ingest/* route in the Cloudflare dashboard
+  // (Workers & Pages → trydos-ingest → Settings → Domains & Routes), or remove
+  // it here and redeploy. Traffic falls straight back to the Next route with
+  // no deploy of trydos needed. Seconds, not minutes.
+  "routes": [
+    { "pattern": "trydos.ramaaz.dev/ingest/*", "zone_name": "ramaaz.dev" },
+    { "pattern": "trydos.ramaaz.dev/ingest-edge/*", "zone_name": "ramaaz.dev" }
+  ]
+
+  // No secrets and no bindings: the PostHog hosts are public constants and the
+  // project key is public by design (NEXT_PUBLIC_POSTHOG_KEY). Nothing here
+  // needs `wrangler secret`.
+}
