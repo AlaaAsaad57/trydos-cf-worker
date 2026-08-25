@@ -40,6 +40,8 @@ Two Workers are also live on `trydos.ramaaz.dev`:
 Both roll back by deleting the route in the dashboard — the Next handlers are
 still deployed underneath and take over in seconds.
 
+Standing this up on a different Cloudflare account: [DEPLOY.md](DEPLOY.md).
+
 ## If you only do one thing
 
 **Item 4, the Grafana exposure.** It is the only item on this list where

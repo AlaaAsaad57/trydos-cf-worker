@@ -2,26 +2,49 @@
 
 Cache rules, WAF rules and rate limiting for the `ramaaz.dev` zone.
 
-## ⛔ Do not `apply` yet
+## ✅ Applied 2026-08-24 — this is live, not a proposal
 
-The zone already has configuration that predates this repo — media has been
-served through Cloudflare for some time (CLAUDE.md §3.10) and nobody has read
-what rules exist. **Terraform deletes rules it does not know about.** A blind
-`apply` against a live media zone is an outage.
+An earlier revision of this file said "do not apply yet" and "nothing here has
+been validated against a real zone or even parsed". **Both statements are now
+out of date.** Three rulesets were applied to `ramaaz.dev` with Terraform
+1.15.9 / provider v5.23.0 and verified against production — full before/after
+evidence in CLAUDE.md §3.17.
 
-Required order:
+| Ruleset | Phase | Id |
+|---|---|---|
+| `media delivery cache` | `http_request_cache_settings` | `319e5667ae4040b8bba21ebb8f6b9e9d` |
+| `media protection` | `http_request_firewall_custom` | `eca8b23256f740948fc4b624fd5b2490` |
+| `media upload rate limit` | `http_ratelimit` | `ef020c4c6487456183bf8c9a64aea48e` |
 
-1. Read the current state. Either a read-only API token (Zone:Read, Zone
-   Settings:Read) or a paste of the Rules → Cache Rules and Security → WAF
+The plan was `3 to add, 0 to change, 0 to destroy`, which is what made it safe:
+the zone audit found **no pre-existing custom rulesets** (CLAUDE.md §3.11), so
+there was nothing for Terraform to clobber.
+
+`settings.tf` is the exception — it is **not** applied. Those four zone
+settings were changed in the dashboard and the file is a record of intent. Read
+its header before running it.
+
+### ⛔ The warning still applies to any OTHER zone
+
+**Terraform deletes rules it does not know about.** The apply above was safe
+because the zone was empty of custom rules, not because apply is safe. On a
+zone that already has cache or WAF rules:
+
+1. Read the current state — a read-only API token (Zone:Read, Zone
+   Settings:Read), or a paste of the Rules → Cache Rules and Security → WAF
    pages.
-2. `terraform import` whatever already exists, or confirm the rulesets are
-   empty.
-3. `terraform plan` and read every line of it.
+2. `terraform import` whatever exists, or confirm the rulesets are empty.
+3. `terraform plan` and read every line.
 4. Only then `apply`.
 
-Nothing here has been validated against a real zone or even parsed — Terraform
-is not installed in the authoring environment. Treat these files as a reviewed
-proposal, not as working code, until a `plan` has run.
+Deploying this to a different Cloudflare account: see [DEPLOY.md](../DEPLOY.md).
+
+### Free-plan entitlements only fail at `apply`
+
+`plan` is client-side, so it passes against limits the API will reject.
+CLAUDE.md §4.3 lists the four that surfaced one at a time here — rate-limit
+characteristics, mitigation timeout, `not in` syntax, and `Matches` being
+Business-plan-only. Budget for that when adding rules.
 
 ## Provider version
 
