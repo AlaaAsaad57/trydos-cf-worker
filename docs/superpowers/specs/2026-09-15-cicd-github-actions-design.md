@@ -73,8 +73,10 @@ Steps:
 
 1. Check out the repo.
 2. Set up Node 22.
-3. Turn on pnpm 10.26.0 with `corepack`. The version comes from the
-   `packageManager` field in `package.json`, so there is one source of truth.
+3. Install pnpm 10.26.0 with `npm install --global`, using the version from
+   the `packageManager` field in `package.json`, so there is one source of
+   truth. Not `corepack`: corepack has had signature-verification failures
+   with recent pnpm releases.
 4. Restore the pnpm store from cache, keyed on `pnpm-lock.yaml`.
 5. `pnpm install --frozen-lockfile`
 6. `pnpm typecheck` — runs `tsc --build`

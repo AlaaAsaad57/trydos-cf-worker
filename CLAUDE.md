@@ -883,6 +883,10 @@ Worker's `needDecode` is correctly false on this path.
 
 ### 3.21 ✅ CI/CD on GitHub Actions — live and verified (2026-09-15)
 
+⚠️ **If you are here to roll back a Worker, read the ROLLBACK note at the
+bottom first.** Deleting a route in the dashboard no longer stays deleted on
+its own — CI can re-create it.
+
 Repo: https://github.com/AlaaAsaad57/trydos-cf-worker (**public**).
 One workflow, `.github/workflows/ci.yml`, four jobs.
 
@@ -976,11 +980,30 @@ account-owned token, which is indistinguishable from a dead one. That cost an
 hour here and produced a wrong conclusion that had to be retracted. Verifying
 is also not enough — probe the endpoints a deploy actually uses.
 
-**ROLLBACK** — CI only runs `wrangler deploy`; it never touches routes or
-Terraform. So the §3.14 and §3.19 rollbacks still apply unchanged: delete the
-Worker route in the Cloudflare dashboard and traffic falls back to Vercel. To
-stop CI deploying at all, delete `.github/workflows/ci.yml` or remove the two
-deploy jobs.
+**ROLLBACK** — CI never runs Terraform, that part still holds. But CI does run
+`wrangler deploy`, and both `wrangler.jsonc` files declare `routes`. A deploy
+re-applies those routes. Proof, from the real deploy log of run
+`34966743880`:
+
+```
+Deployed trydos-proxy triggers (1.24 sec)
+  trydos.ramaaz.dev/api/proxy* (zone name: ramaaz.dev)
+Deployed trydos-ingest triggers (1.71 sec)
+  trydos.ramaaz.dev/ingest/* (zone name: ramaaz.dev)
+```
+
+So deleting the route in the Cloudflare dashboard, as §3.14 and §3.19 say, is
+now only **temporary**. The next push to `main` that qualifies for a deploy
+(see the table above) puts the route back, silently, with live shopper auth
+traffic behind it again.
+
+A rollback that actually sticks needs one of these, not just the dashboard
+delete:
+
+- Disable the workflow: `gh workflow disable ci.yml`.
+- Remove the route from the Worker's `wrangler.jsonc` and merge that change.
+- Delete the route in the dashboard **and** disable the workflow in the same
+  action, so nothing can race you.
 
 ### 3.11 Zone audit (read-only API token, 2026-08-24)
 
