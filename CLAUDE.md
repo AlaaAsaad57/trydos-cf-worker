@@ -947,6 +947,37 @@ rests on. Both scripts now carry `--fail-if-no-match`, which exits 1 on no
 match. Same lesson as §3.15 and §3.20: the code was fine and the thing around it
 was not.
 
+**✅ A real code change was shipped through CI and verified (2026-09-15).**
+PR #2 added `x-trydos-edge: ingest` to all four of the ingest Worker's return
+paths, test-first — 4 new tests failed first (`expected null to be 'ingest'`),
+then passed, suite now 16. Run `34970696743`:
+
+| Check | Result |
+|---|---|
+| `deploy trydos-ingest` | success, 8 steps, version `52b5f33b-a711-46d4-9f9d-eaad0186e7d6` |
+| `deploy trydos-proxy` | **skipped, 0 steps** — only `workers/ingest/` changed |
+| `/ingest/static/array.js` | 200, `x-trydos-edge: ingest` present |
+| `/api/proxy?s=vv7qsd&…` | 200, `x-market-backend: gateway`, **no** `x-trydos-edge` |
+| Cloudflare live versions | proxy still `c9af0fd8…` at **12:05:08**, ingest `52b5f33b…` at **12:45:49** |
+
+That last row is the proof that matters: the proxy's version id and timestamp
+are unchanged, so the path filter really does deploy only the Worker that
+changed. It is not merely that the job was skipped — nothing reached the proxy.
+
+**Use `x-trydos-edge` instead of the absence of `x-vercel-id`.** §3.14 and
+§3.19 tell you to check that `x-vercel-id` is *missing* to prove a Worker
+served a request. That is indirect and easy to misread. The ingest Worker now
+sends a positive marker. The proxy Worker does not yet — add one there if the
+same check is ever needed.
+
+**⚠️ Still never tested: that a FAILING test blocks a deploy.** No run has had
+a red `test` job. The skip path is proven (PR jobs showed `steps: 0`), and
+GitHub's `needs` semantics say a plain `if:` does not override failure
+propagation — but this exact path, the claim the whole design rests on, has
+never run. User decision 2026-09-15 was to leave it untested rather than push a
+deliberately broken test to a branch that auto-deploys. **Watch the first
+genuinely red run on `main` and confirm both deploy jobs skip.**
+
 **Deliberately NOT here, both user decisions on 2026-09-15:**
 
 - **Terraform.** State is local at `infra/terraform.tfstate`; `apply` stays
