@@ -775,25 +775,46 @@ Only start this once the user has created the Cloudflare API token. Until then T
 - Consumes: a working `main` with CI from Task 4.
 - Produces: a verified end-to-end deploy.
 
-- [ ] **Step 1: Confirm the token exists and is valid**
+- [ ] **Step 1: Confirm the token has the Workers Scripts permission**
 
-Ask the user to create it in the Cloudflare dashboard under My Profile, API Tokens, Create Custom Token, with exactly two permissions: Account to Workers Scripts Edit, and Zone to Workers Routes Edit scoped to `ramaaz.dev`. Then have them run:
+**Status on 2026-09-15:** the token is created, valid, active, with no expiry, and already stored as the repo secret `CLOUDFLARE_API_TOKEN`. Token id `52296368c9814c38193fa45aed57a7f2`. It is **account-owned**, not user-owned.
 
-```bash
-gh secret set CLOUDFLARE_API_TOKEN --repo AlaaAsaad57/trydos-cf-worker
-```
-
-Verify it is valid before trusting it, reading it from a file so it never lands in shell history:
+**🔴 Do not verify an account-owned token with `/user/tokens/verify`.** That endpoint answers error 1000 "Invalid API Token" for a perfectly good account token, which looks identical to a dead token. Use the account endpoint:
 
 ```bash
+ACCT=ea7be3230557106b17d8e4a905ffe5bc
 curl -s -H "Authorization: Bearer $(tr -d ' \r\n' < /path/to/token-file)" \
-  https://api.cloudflare.com/client/v4/user/tokens/verify \
-  | python -c "import sys,json;d=json.load(sys.stdin);print('success:',d.get('success'))"
+  "https://api.cloudflare.com/client/v4/accounts/$ACCT/tokens/verify" \
+  | python -c "import sys,json;d=json.load(sys.stdin);r=d.get('result') or {};print('success:',d.get('success'),'| status:',r.get('status'))"
 ```
 
-Expected: `success: True`.
+Expected: `success: True | status: active`.
 
-Do **not** reuse the value in the existing `.cf-token` files. It is a genuine Cloudflare token — the `cfat_` prefix is Cloudflare's own format — but Cloudflare returns error 1000 "Invalid API Token" for it, verified 2026-09-15 and already recorded in `infra/settings.tf` on 2026-08-24. It was deleted or rolled in the dashboard and cannot be revived.
+**Verifying is not enough.** A valid token can still lack the permission wrangler needs. Probe the two endpoints a deploy actually uses:
+
+```bash
+ACCT=ea7be3230557106b17d8e4a905ffe5bc
+ZONE=df0581418328bcb0b4cde6d982f5c3ea
+TOK="$(tr -d ' \r\n' < /path/to/token-file)"
+for u in "accounts/$ACCT/workers/scripts" "zones/$ZONE/workers/routes"; do
+  printf '%-40s ' "$u"
+  curl -s -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/$u" \
+    | python -c "import sys,json;d=json.load(sys.stdin);print('OK' if d.get('success') else 'DENIED '+str([(e.get('code'),e.get('message')) for e in d.get('errors',[])]))"
+done
+```
+
+Both must print `OK`. Measured on 2026-09-15 the result was:
+
+| Endpoint | Result |
+|---|---|
+| `workers/scripts` | **DENIED, error 10000 Authentication error** |
+| `workers/routes` | OK |
+
+So the token can manage routes but **cannot upload Worker code**, which is the main thing `wrangler deploy` does. Do not start Step 3 until `workers/scripts` returns `OK`.
+
+**The fix is to edit the existing token, not make a new one.** In the Cloudflare dashboard go to **Manage Account → API Tokens** (account-owned tokens are not under My Profile), open the token, and add **Account → Workers Scripts → Edit**. Editing permissions does not change the token value, so the repo secret stays correct and nothing needs re-pasting.
+
+Do **not** reuse the value in the existing `.cf-token` files. That one is dead on both the user and the account verify endpoints — error 1000 either way, re-checked 2026-09-15, and already recorded in `infra/settings.tf` on 2026-08-24.
 
 - [ ] **Step 1b: Delete the two dead token files**
 

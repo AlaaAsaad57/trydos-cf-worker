@@ -168,11 +168,21 @@ is otherwise able to write to the repo, which nothing here needs.
 | Secret | State on 2026-09-15 |
 |---|---|
 | `CLOUDFLARE_ACCOUNT_ID` | set (`ea7be323…`) |
-| `CLOUDFLARE_API_TOKEN` | **missing** |
+| `CLOUDFLARE_API_TOKEN` | set, but **one permission short** |
 
-The token must be created in the Cloudflare dashboard with exactly two
-permissions: Account to Workers Scripts Edit, and Zone to Workers Routes Edit
-scoped to `ramaaz.dev`.
+The token needs two permissions: Account to Workers Scripts Edit, and Zone to
+Workers Routes Edit scoped to `ramaaz.dev`. Probed on 2026-09-15 it has the
+second but **not the first**, so `wrangler deploy` cannot upload code yet.
+
+**⚠️ The token is account-owned, and that changes how you check it.**
+`GET /client/v4/user/tokens/verify` returns error 1000 "Invalid API Token" for
+a healthy account-owned token. That is indistinguishable from a dead token, and
+it caused a wrong conclusion earlier in this project. Use
+`GET /client/v4/accounts/{account_id}/tokens/verify` instead.
+
+Verifying alone is also not enough — a valid token can still lack a permission.
+Probe `accounts/{id}/workers/scripts` and `zones/{id}/workers/routes` directly.
+Both must return success before deploys can work.
 
 The file `.cf-token`, which exists in both the home folder and `infra/`, holds
 the **same** value in both places. It **is** a real Cloudflare API token — the
