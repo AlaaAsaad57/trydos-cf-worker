@@ -175,10 +175,22 @@ permissions: Account to Workers Scripts Edit, and Zone to Workers Routes Edit
 scoped to `ramaaz.dev`.
 
 The file `.cf-token`, which exists in both the home folder and `infra/`, holds
-the **same** value in both places and the Cloudflare API rejects it as invalid.
-It is 53 characters with a four-letter prefix; a Cloudflare API token is 40
-characters with no prefix. It is some other service's key. Both copies should
-be deleted.
+the **same** value in both places. It **is** a real Cloudflare API token — the
+`cfat_` prefix is Cloudflare's own token format — but Cloudflare rejects it:
+
+```
+GET /client/v4/user/tokens/verify
+→ success: false, error 1000 "Invalid API Token"
+```
+
+So the token was deleted or rolled in the dashboard, not mistyped and not from
+another service. `infra/settings.tf` records the same error 1000 on 2026-08-24,
+so it has been dead since at least then. A replacement must be created; the old
+value cannot be revived. Both copies should be deleted.
+
+An earlier revision of this file said the value was "some other service's key"
+because it did not match the older 40-character unprefixed format. **That was
+wrong and is retracted.**
 
 The seven backend URL secrets in the repo are unused by this design.
 

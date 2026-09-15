@@ -791,7 +791,9 @@ curl -s -H "Authorization: Bearer $(tr -d ' \r\n' < /path/to/token-file)" \
   | python -c "import sys,json;d=json.load(sys.stdin);print('success:',d.get('success'))"
 ```
 
-Expected: `success: True`. A Cloudflare API token is 40 characters with no prefix. The existing `.cf-token` files are 53 characters and are rejected — they are not Cloudflare tokens.
+Expected: `success: True`.
+
+Do **not** reuse the value in the existing `.cf-token` files. It is a genuine Cloudflare token — the `cfat_` prefix is Cloudflare's own format — but Cloudflare returns error 1000 "Invalid API Token" for it, verified 2026-09-15 and already recorded in `infra/settings.tf` on 2026-08-24. It was deleted or rolled in the dashboard and cannot be revived.
 
 - [ ] **Step 1b: Delete the two dead token files**
 
