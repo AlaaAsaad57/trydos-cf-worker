@@ -90,8 +90,11 @@ Expected: `pnpm typecheck` exits 0, and `git status --short` shows only `.gitign
 
 - [ ] **Step 6: Commit**
 
+Stage only `.gitignore`. The deletion is **already staged** by `git rm --cached` in Step 3. Do not run `git add tsconfig.tsbuildinfo` — the file is now ignored, so git refuses to add it and the command exits non-zero.
+
 ```bash
-git add .gitignore tsconfig.tsbuildinfo
+git add .gitignore
+git status --short
 git commit -m "Stop tracking tsconfig.tsbuildinfo
 
 tsc --build rewrites it on every run, so it dirties every diff and can
@@ -647,22 +650,22 @@ The workflow cannot be truly tested locally. This task runs it for real and chec
 - Consumes: everything from Tasks 1 to 3.
 - Produces: a merged `main` with working CI.
 
-- [ ] **Step 1: Push the spec commit that is already on main**
+- [ ] **Step 1: Push the docs commits that are already on main**
+
+The branch `ci/github-actions` was created from `main` **before** Task 1, so `main` carries only the spec, plan and corrections, and the branch carries only the CI work. Nothing needs moving.
+
+**🔴 Never run `git reset --hard` on `main` here.** An earlier revision of this plan said to. It would destroy the plan and correction commits made after the design doc.
+
+Push the docs commits so the pull request diff shows only the CI change:
 
 ```bash
+git checkout main
 git log --oneline origin/main..main
-```
-
-If this lists commits made before Task 1 (for example `d2ec913`, the design doc), move the CI work onto a branch first so the pull request contains only the CI change:
-
-```bash
-git branch ci/github-actions
-git reset --hard d2ec913
 git push origin main
 git checkout ci/github-actions
 ```
 
-Expected: `main` on GitHub now carries the spec, and the three CI commits sit on `ci/github-actions`.
+Expected: the log lists the docs commits, the push succeeds, and `main` on GitHub now carries the spec and plan.
 
 - [ ] **Step 2: Push the branch and open the pull request**
 
