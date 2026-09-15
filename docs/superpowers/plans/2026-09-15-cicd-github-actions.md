@@ -806,16 +806,18 @@ for u in "accounts/$ACCT/workers/scripts" "zones/$ZONE/workers/routes"; do
 done
 ```
 
-Both must print `OK`. Measured on 2026-09-15 the result was:
+Both must print `OK`.
 
-| Endpoint | Result |
-|---|---|
-| `workers/scripts` | **DENIED, error 10000 Authentication error** |
-| `workers/routes` | OK |
+**✅ Resolved 2026-09-15.** The token was initially one permission short — `workers/scripts` answered error 10000 while `workers/routes` answered OK. The user added **Account → Workers Scripts → Edit** and both now pass:
 
-So the token can manage routes but **cannot upload Worker code**, which is the main thing `wrangler deploy` does. Do not start Step 3 until `workers/scripts` returns `OK`.
+| Endpoint | Before | After |
+|---|---|---|
+| `workers/scripts` | DENIED, error 10000 | **OK**, 6 scripts |
+| `workers/routes` | OK | OK, 4 routes |
 
-**The fix is to edit the existing token, not make a new one.** In the Cloudflare dashboard go to **Manage Account → API Tokens** (account-owned tokens are not under My Profile), open the token, and add **Account → Workers Scripts → Edit**. Editing permissions does not change the token value, so the repo secret stays correct and nothing needs re-pasting.
+The scripts list contains `trydos-proxy` and `trydos-ingest`, and all four expected routes are present including the trailing-`*` proxy patterns. So the token is pointed at the right account and zone. This step is complete; go straight to Step 3.
+
+Worth remembering for next time: **editing a token's permissions does not change its value**, so the repo secret stayed correct and nothing needed re-pasting. Account-owned tokens live under **Manage Account → API Tokens**, not My Profile.
 
 Do **not** reuse the value in the existing `.cf-token` files. That one is dead on both the user and the account verify endpoints — error 1000 either way, re-checked 2026-09-15, and already recorded in `infra/settings.tf` on 2026-08-24.
 
