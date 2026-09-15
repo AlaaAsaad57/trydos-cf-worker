@@ -6,8 +6,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --build",
-    "test:worker": "pnpm --filter @cf/proxy-worker test",
-    "test:worker:ingest": "pnpm --filter @cf/ingest-worker test",
+    "test:worker": "pnpm --filter @cf/proxy-worker --fail-if-no-match test",
+    "test:worker:ingest": "pnpm --filter @cf/ingest-worker --fail-if-no-match test",
     "test:all": "pnpm test && pnpm test:worker && pnpm test:worker:ingest"
   },
   "devDependencies": {
