@@ -724,7 +724,23 @@ Then watch it:
 gh run watch "$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-Expected while `CLOUDFLARE_API_TOKEN` is still missing: `test` passes, `changes` runs and reports `proxy=false ingest=false` (the merge touches only `.github/**`), so **both deploy jobs are skipped**. That is the correct result and it proves the path filter works.
+**⚠️ Corrected 2026-09-15. An earlier revision of this step said the merge would touch only `.github/**`, so `changes` would report `proxy=false ingest=false` and both deploy jobs would skip. That is wrong.**
+
+The fix round on Task 3 added `--fail-if-no-match` to two scripts in the root `package.json`, and `package.json` is in the shared-file list that deploys **both** Workers. Measured against the real branch:
+
+```
+$ git diff --name-only main..ci/github-actions | bash .github/scripts/select-workers.sh
+proxy=true
+ingest=true
+```
+
+So the merge **is a real production deploy of both Workers**, not a no-op.
+
+The risk is low but not zero. No Worker source file changed on this branch, so `wrangler deploy` uploads the same code that is already live, and the routes in both `wrangler.jsonc` files already match the four routes on the zone. The practical effect is two new version ids for identical code. It is, in fact, a free end-to-end proof of the deploy path.
+
+Expected: `test` passes, `changes` reports `proxy=true ingest=true`, and both deploy jobs run and succeed. Confirm afterwards with Step 5 of Task 5 that production still answers and that neither `/api/proxy` nor `/ingest/static/array.js` has gained an `x-vercel-id` header.
+
+If you want the merge to deploy nothing instead, move the `--fail-if-no-match` change to a separate pull request merged later.
 
 - [ ] **Step 7: Record the outcome in CLAUDE.md**
 
@@ -806,16 +822,18 @@ for u in "accounts/$ACCT/workers/scripts" "zones/$ZONE/workers/routes"; do
 done
 ```
 
-Both must print `OK`. Measured on 2026-09-15 the result was:
+Both must print `OK`.
 
-| Endpoint | Result |
-|---|---|
-| `workers/scripts` | **DENIED, error 10000 Authentication error** |
-| `workers/routes` | OK |
+**✅ Resolved 2026-09-15.** The token was initially one permission short — `workers/scripts` answered error 10000 while `workers/routes` answered OK. The user added **Account → Workers Scripts → Edit** and both now pass:
 
-So the token can manage routes but **cannot upload Worker code**, which is the main thing `wrangler deploy` does. Do not start Step 3 until `workers/scripts` returns `OK`.
+| Endpoint | Before | After |
+|---|---|---|
+| `workers/scripts` | DENIED, error 10000 | **OK**, 6 scripts |
+| `workers/routes` | OK | OK, 4 routes |
 
-**The fix is to edit the existing token, not make a new one.** In the Cloudflare dashboard go to **Manage Account → API Tokens** (account-owned tokens are not under My Profile), open the token, and add **Account → Workers Scripts → Edit**. Editing permissions does not change the token value, so the repo secret stays correct and nothing needs re-pasting.
+The scripts list contains `trydos-proxy` and `trydos-ingest`, and all four expected routes are present including the trailing-`*` proxy patterns. So the token is pointed at the right account and zone. This step is complete; go straight to Step 3.
+
+Worth remembering for next time: **editing a token's permissions does not change its value**, so the repo secret stayed correct and nothing needed re-pasting. Account-owned tokens live under **Manage Account → API Tokens**, not My Profile.
 
 Do **not** reuse the value in the existing `.cf-token` files. That one is dead on both the user and the account verify endpoints — error 1000 either way, re-checked 2026-09-15, and already recorded in `infra/settings.tf` on 2026-08-24.
 

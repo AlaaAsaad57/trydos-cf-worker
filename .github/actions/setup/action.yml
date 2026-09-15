@@ -1,0 +1,37 @@
+name: Set up Node and pnpm
+description: Installs Node 22 and the pinned pnpm, restores the pnpm store cache, and installs dependencies.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: "22"
+
+    # pnpm comes from the packageManager field so there is one source of
+    # truth. We install it with npm rather than corepack: corepack has had
+    # signature-verification failures with recent pnpm releases, and this
+    # avoids that whole class of problem.
+    - name: Install pnpm from the packageManager field
+      shell: bash
+      run: |
+        PNPM_SPEC="$(node -p "require('./package.json').packageManager")"
+        echo "packageManager field: $PNPM_SPEC"
+        npm install --global "$PNPM_SPEC"
+        pnpm --version
+
+    - name: Find the pnpm store
+      id: store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-${{ runner.os }}-
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile

@@ -1,5 +1,8 @@
 node_modules/
 dist/
+
+# tsc --build writes this; it is a cache, not source.
+tsconfig.tsbuildinfo
 .wrangler/
 .dev.vars
 .dev.vars.*

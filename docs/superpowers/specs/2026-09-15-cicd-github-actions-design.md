@@ -168,11 +168,24 @@ is otherwise able to write to the repo, which nothing here needs.
 | Secret | State on 2026-09-15 |
 |---|---|
 | `CLOUDFLARE_ACCOUNT_ID` | set (`ea7be323…`) |
-| `CLOUDFLARE_API_TOKEN` | set, but **one permission short** |
+| `CLOUDFLARE_API_TOKEN` | set ✅, both permissions confirmed |
 
 The token needs two permissions: Account to Workers Scripts Edit, and Zone to
-Workers Routes Edit scoped to `ramaaz.dev`. Probed on 2026-09-15 it has the
-second but **not the first**, so `wrangler deploy` cannot upload code yet.
+Workers Routes Edit scoped to `ramaaz.dev`. Both were confirmed by probing the
+live API on 2026-09-15, after the user added the Workers Scripts permission:
+
+| Endpoint | Before the edit | After |
+|---|---|---|
+| `accounts/{id}/workers/scripts` | DENIED, error 10000 | **OK**, 6 scripts |
+| `zones/{id}/workers/routes` | OK | OK, 4 routes |
+
+The scripts list contains `trydos-proxy` (modified 2026-09-01) and
+`trydos-ingest` (modified 2026-08-25), matching the version dates in CLAUDE.md
+sections 3.20 and 3.19. All four routes are present, including the trailing-`*`
+proxy patterns from section 3.20. So the token points at the right account and
+the right zone.
+
+Token id `52296368c9814c38193fa45aed57a7f2`, account-owned, active, no expiry.
 
 **⚠️ The token is account-owned, and that changes how you check it.**
 `GET /client/v4/user/tokens/verify` returns error 1000 "Invalid API Token" for
