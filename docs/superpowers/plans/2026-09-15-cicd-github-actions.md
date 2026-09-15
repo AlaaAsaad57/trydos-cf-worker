@@ -724,7 +724,23 @@ Then watch it:
 gh run watch "$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-Expected while `CLOUDFLARE_API_TOKEN` is still missing: `test` passes, `changes` runs and reports `proxy=false ingest=false` (the merge touches only `.github/**`), so **both deploy jobs are skipped**. That is the correct result and it proves the path filter works.
+**⚠️ Corrected 2026-09-15. An earlier revision of this step said the merge would touch only `.github/**`, so `changes` would report `proxy=false ingest=false` and both deploy jobs would skip. That is wrong.**
+
+The fix round on Task 3 added `--fail-if-no-match` to two scripts in the root `package.json`, and `package.json` is in the shared-file list that deploys **both** Workers. Measured against the real branch:
+
+```
+$ git diff --name-only main..ci/github-actions | bash .github/scripts/select-workers.sh
+proxy=true
+ingest=true
+```
+
+So the merge **is a real production deploy of both Workers**, not a no-op.
+
+The risk is low but not zero. No Worker source file changed on this branch, so `wrangler deploy` uploads the same code that is already live, and the routes in both `wrangler.jsonc` files already match the four routes on the zone. The practical effect is two new version ids for identical code. It is, in fact, a free end-to-end proof of the deploy path.
+
+Expected: `test` passes, `changes` reports `proxy=true ingest=true`, and both deploy jobs run and succeed. Confirm afterwards with Step 5 of Task 5 that production still answers and that neither `/api/proxy` nor `/ingest/static/array.js` has gained an `x-vercel-id` header.
+
+If you want the merge to deploy nothing instead, move the `--fail-if-no-match` change to a separate pull request merged later.
 
 - [ ] **Step 7: Record the outcome in CLAUDE.md**
 
