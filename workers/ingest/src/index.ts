@@ -24,6 +24,18 @@ import {
  *  network-level failure cannot be simulated through miniflare's outbound
  *  service — a throw there arrives as a 500 *response*, which is a different
  *  path entirely. Production always uses the global fetch. */
+// Marks every response this Worker returns, so a direct check replaces the
+// awkward absence-based one in CLAUDE.md §3.14 ("no x-vercel-id means a
+// Worker answered"). A positive header is unambiguous; an absent header could
+// also just mean the request never reached anything.
+const EDGE_MARKER_HEADER = "x-trydos-edge";
+const EDGE_MARKER_VALUE = "ingest";
+
+const withEdgeMarker = (response: Response): Response => {
+  response.headers.set(EDGE_MARKER_HEADER, EDGE_MARKER_VALUE);
+  return response;
+};
+
 export const proxyIngest = async (
   request: Request,
   fetcher: typeof fetch = fetch,
@@ -38,15 +50,17 @@ export const proxyIngest = async (
     method !== "POST" &&
     method !== "OPTIONS"
   ) {
-    return new Response(null, {
-      status: 405,
-      headers: { allow: "GET, HEAD, POST, OPTIONS" },
-    });
+    return withEdgeMarker(
+      new Response(null, {
+        status: 405,
+        headers: { allow: "GET, HEAD, POST, OPTIONS" },
+      }),
+    );
   }
 
   const url = new URL(request.url);
   const target = resolveIngestTarget(url.pathname, url.search);
-  if (!target.ok) return new Response(null, { status: 404 });
+  if (!target.ok) return withEdgeMarker(new Response(null, { status: 404 }));
 
   const headers = buildIngestRequestHeaders(
     request.headers,
@@ -77,14 +91,16 @@ export const proxyIngest = async (
     // (route.ts:72). A dropped event is invisible; a broken page is not.
     // An upstream that *answers* 5xx is passed through unchanged below, so a
     // real PostHog outage still reaches the SDK's retry logic.
-    return new Response(null, { status: 502 });
+    return withEdgeMarker(new Response(null, { status: 502 }));
   }
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers: filterIngestResponseHeaders(upstream.headers),
-  });
+  return withEdgeMarker(
+    new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: filterIngestResponseHeaders(upstream.headers),
+    }),
+  );
 };
 
 export default {

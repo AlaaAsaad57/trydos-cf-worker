@@ -130,4 +130,41 @@ describe("ingest worker", () => {
     expect(await res.text()).toBe("");
   });
 
+  describe("x-trydos-edge marker header", () => {
+    // CLAUDE.md §3.14 says the only way to tell a Worker answered is that
+    // `x-vercel-id` is *absent* — indirect, and easy to misread as "the
+    // request failed" rather than "a different origin served it". This
+    // header is a direct, positive marker instead. It must be on every
+    // response shape the handler can return, not just the happy path.
+
+    it("is present on the proxied 200 response", async () => {
+      const res = await capture("/ingest/i/v0/e/", {
+        method: "POST",
+        body: "{}",
+      });
+      expect(res.headers.get("x-trydos-edge")).toBe("ingest");
+    });
+
+    it("is present on the 405 method-rejection response", async () => {
+      const res = await SELF.fetch(`${ORIGIN}/ingest/i/v0/e/`, { method: "PUT" });
+      expect(res.status).toBe(405);
+      expect(res.headers.get("x-trydos-edge")).toBe("ingest");
+    });
+
+    it("is present on the 404 unknown-target response", async () => {
+      const res = await SELF.fetch(`${ORIGIN}/api/proxy`);
+      expect(res.status).toBe(404);
+      expect(res.headers.get("x-trydos-edge")).toBe("ingest");
+    });
+
+    it("is present on the 502 upstream-failure response", async () => {
+      const res = await proxyIngest(
+        new Request(`${ORIGIN}/ingest/i/v0/e/`, { method: "POST", body: "{}" }),
+        () => Promise.reject(new Error("connection reset")),
+      );
+      expect(res.status).toBe(502);
+      expect(res.headers.get("x-trydos-edge")).toBe("ingest");
+    });
+  });
+
 });
