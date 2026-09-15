@@ -881,6 +881,107 @@ identical on all seven services, and `buildProxyGetUrl`
 (`../trydos/utils/proxyGetUrl.ts:43`) deliberately never sends `d=true`, so the
 Worker's `needDecode` is correctly false on this path.
 
+### 3.21 ✅ CI/CD on GitHub Actions — live and verified (2026-09-15)
+
+Repo: https://github.com/AlaaAsaad57/trydos-cf-worker (**public**).
+One workflow, `.github/workflows/ci.yml`, four jobs.
+
+| Job | Runs on | Purpose |
+|---|---|---|
+| `test` | every PR **and** every push to `main` | typecheck + 144 tests + the selector's own 18 checks |
+| `changes` | push to `main` only | decides which Worker to deploy |
+| `deploy trydos-proxy` | push to `main`, if selected | `wrangler deploy` in `workers/proxy` |
+| `deploy trydos-ingest` | push to `main`, if selected | `wrangler deploy` in `workers/ingest` |
+
+Both deploy jobs declare `needs: [test, changes]`, so **no Worker deploys
+unless every test passes**. The deploy rules live in
+`.github/scripts/select-workers.sh`, which has 18 tests of its own that CI also
+runs — the logic is testable on a laptop instead of only by pushing.
+`packages/shared/`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` and
+`tsconfig.json` deploy both. An unreadable base commit deploys both, which is
+the safe direction.
+
+**🔴 The security property that matters, proved on a real run.** The repo is
+public, so anyone can fork it and open a PR. On PR #1 the three non-test jobs
+reported `conclusion: skipped` with **`steps: 0`** — they did not fail early,
+they never executed. Checked five ways: `changes` is fenced to
+`github.event_name == 'push' && github.ref == 'refs/heads/main'`; neither
+deploy `if` uses `always()`; `pull_request_target` appears nowhere; `secrets.`
+appears only inside the two deploy jobs; and `github.event.*` reaches the shell
+through `env:`, never interpolated into a `run:` block.
+
+**First deploy through CI, 2026-09-15** —
+run https://github.com/AlaaAsaad57/trydos-cf-worker/actions/runs/34966743880
+
+| Worker | Version id | Confirmed live by |
+|---|---|---|
+| `trydos-proxy` | `c9af0fd8-0847-4dd5-9f82-855b675c5587` | Cloudflare deployments API, 12:05:08Z |
+| `trydos-ingest` | `953263e5-e3a3-4775-8301-4ca3329571f4` | Cloudflare deployments API, 12:05:05Z |
+
+Verified after that deploy, against production:
+
+| Check | Result |
+|---|---|
+| `POST /api/proxy` market `/web/home/startingSettings` | 200, `x-market-backend: gateway`, 2656 B |
+| `GET /api/proxy?s=vv7qsd&u=…` (the §3.20 preload form) | 200, **byte-identical** to POST (`sha256 a1e7fbaf…`) |
+| `//evil.tld/x` | 400 — SSRF guard holds |
+| `send_otp`, `send%255Fotp` | 403 each — OTP guard holds |
+| `/ingest/static/array.js` | 200, no `x-vercel-id` |
+| `/gb-en` | 200, `x-vercel-id` present — Vercel control, site up |
+
+**Three risks that could not be tested on Windows are now closed.** On
+`ubuntu-latest`: `pnpm install --frozen-lockfile` succeeded cold in 3.7s, the
+workerd suites passed (101 + 31 + 12), and `select-workers.test.sh` passed its
+18 checks on Linux.
+
+**⚠️ One real trap found and fixed.** The root `package.json` had
+`pnpm --filter @cf/proxy-worker test`. **`pnpm --filter` exits 0 when nothing
+matches** — measured, not assumed. So renaming a Worker package would have made
+the test job go green *without running that Worker's tests*, and the deploy
+would have proceeded untested. That defeats the one property the whole design
+rests on. Both scripts now carry `--fail-if-no-match`, which exits 1 on no
+match. Same lesson as §3.15 and §3.20: the code was fine and the thing around it
+was not.
+
+**Deliberately NOT here, both user decisions on 2026-09-15:**
+
+- **Terraform.** State is local at `infra/terraform.tfstate`; `apply` stays
+  manual. Git cannot lock, so a state file in the repo would let a local apply
+  and a CI apply silently overwrite each other.
+- **No approval gate.** A merge to `main` reaches live shopper traffic in about
+  a minute. The tests are the only thing in between.
+
+**⚠️ Three known gaps, all raised and deferred by the user:**
+
+1. **`main` has no branch protection**, so a direct push skips review and
+   deploys. A repo collaborator could also open a PR rewriting `ci.yml` to
+   deploy on `pull_request`. That is not an escalation — write access already
+   allows a direct push — but branch protection would close both.
+2. **The two Cloudflare secrets are repo-level, not environment-level**, so the
+   `production` environment's rules do not gate them. Moving them into the
+   environment would stop any PR-triggered job reading them.
+3. **No `.gitattributes`.** A contributor with `core.autocrlf=false` on Windows
+   could commit CRLF and break the CI shell scripts in a way that looks like a
+   bash bug. Blobs are clean LF today.
+
+**Secrets in the repo:** `CLOUDFLARE_API_TOKEN` (account-owned, id
+`52296368…`, Workers Scripts Edit + Workers Routes Edit) and
+`CLOUDFLARE_ACCOUNT_ID`. The seven backend URL secrets are **unused** —
+`wrangler deploy` keeps the secrets already on Cloudflare.
+
+⚠️ **Verify an account-owned token with
+`/accounts/{id}/tokens/verify`, never `/user/tokens/verify`.** The user
+endpoint returns error 1000 "Invalid API Token" for a perfectly healthy
+account-owned token, which is indistinguishable from a dead one. That cost an
+hour here and produced a wrong conclusion that had to be retracted. Verifying
+is also not enough — probe the endpoints a deploy actually uses.
+
+**ROLLBACK** — CI only runs `wrangler deploy`; it never touches routes or
+Terraform. So the §3.14 and §3.19 rollbacks still apply unchanged: delete the
+Worker route in the Cloudflare dashboard and traffic falls back to Vercel. To
+stop CI deploying at all, delete `.github/workflows/ci.yml` or remove the two
+deploy jobs.
+
 ### 3.11 Zone audit (read-only API token, 2026-08-24)
 
 Zone `ramaaz.dev` — id `df0581418328bcb0b4cde6d982f5c3ea`, status active, plan
