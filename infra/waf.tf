@@ -24,7 +24,7 @@ resource "cloudflare_ruleset" "media_waf" {
     {
       ref         = "block_public_metrics"
       description = "Prometheus scrape is world-readable at the origin"
-      enabled     = true
+      enabled     = false
       expression  = "(${local.media_host_match}) and (http.request.uri.path eq \"/metrics\")"
       action      = "block"
       # Verified 2026-08-24: GET /metrics returns 200 with the full scrape, no
