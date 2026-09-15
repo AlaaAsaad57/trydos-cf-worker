@@ -795,6 +795,92 @@ true of the Next route, so this is not a regression, but it is now cheap to
 abuse. Free has exactly one rate-limiting rule and `media upload rate limit`
 spent it (§3.17). Fixing it means Pro, or giving up the media limit.
 
+### 3.20 ✅ The proxy Worker answers GET too (2026-09-01)
+
+Version `f93e4001-f72e-4d22-97b8-d1433865b837`. `/api/proxy` now serves two
+wire contracts, mirroring `../trydos/app/api/proxy/route.ts`:
+
+| Contract | Metadata | Body |
+|---|---|---|
+| POST | `x-proxy-*` headers | forwarded, streamed |
+| GET | query string `?s=&u=&c=&l=&d=&sid=` | none, `allowBody: false` |
+
+The GET form exists so a `<link rel="preload">` can start a backend call while
+the browser is still parsing the HTML. A preload issues a plain GET and can
+carry no custom header, so the header contract is unreachable from one.
+
+**🔴 A Cloudflare route pattern does NOT match a URL that has a query string.**
+
+This is the finding worth keeping. The route was `trydos.ramaaz.dev/api/proxy`,
+exact, with no wildcard. Measured 2026-09-01:
+
+| Request | Answered by |
+|---|---|
+| `POST /api/proxy` | Worker |
+| `GET /api/proxy` (no query) | Worker |
+| `GET /api/proxy?s=…&u=…` | **Vercel** — `x-vercel-id` present |
+
+So the entire GET contract was dead on arrival: every parameter it needs lives
+in the query string, which is exactly what stopped the route matching. The fix
+is the trailing `*` — `trydos.ramaaz.dev/api/proxy*`. Nothing else is swallowed,
+because `app/api/proxy` is the only `/api/proxy*` route in trydos. One visible
+side effect: `/api/proxyfoo` now returns the Worker's 503 instead of Vercel's
+404.
+
+Lesson, and it is the §3.15 lesson again: the code was correct and the tests
+passed, and the feature still could not run, because the thing in front of it
+never handed it the request. Test the deployed path, not just the handler.
+
+**Verified live after deploy** (`/api/proxy`, both contracts):
+
+| Check | GET | POST |
+|---|---|---|
+| Real stories call (`s=dw4nge`) | 200, byte-identical to POST | 200 |
+| `/web/home/startingSettings` | — | 200, `x-market-backend: gateway` |
+| Cross-site (`sec-fetch-site: cross-site`) | 503 | n/a |
+| `origin: https://evil.tld` | 503 | n/a |
+| `//evil.tld/x` | 400 | 400 |
+| `/auth/phone/send_otp` (3 encodings) | 403 | 403 |
+| Unknown service token | 503 | 503 |
+| `PUT` | 405, `allow: GET, POST` | |
+
+Untouched, re-probed: `/`, `/gb-en`, `/api/auth/me`, `/api/auth/refresh` all
+still Vercel; `/ingest/*` still its own Worker; media still 200.
+
+**Caching: the GET form is never cached, by three independent mechanisms.**
+The Next route's own comment demands this, because the response can carry a
+signed-in shopper's data — the Worker attaches their token from an HttpOnly
+cookie.
+
+1. Every response sets `Cache-Control: no-store`, including the 200s. Same as
+   the Next route, so preload-reuse behaviour is unchanged from Vercel.
+2. Workers run before cache and a Worker's response is not written to the edge
+   cache. Probed: no `cf-cache-status` header at all across 6 identical GETs.
+3. No cache rule covers `trydos.ramaaz.dev` — every rule in `infra/cache.tf` is
+   scoped to `local.media_host_match` (§3.17).
+
+Never add a cache rule that picks these up merely because they are GETs. If one
+target endpoint is genuinely public, cache that endpoint by its target path.
+
+**⚠️ Dormant until trydos ships.** The only caller is the home-page stories bar
+(`../trydos/components/Home/Stories/StoriesBarClient.tsx:59`, `viaProxyGet:
+true`), and it lives on the unmerged branch `ticket/homepage-cache-phase-2`
+(commit `811c338f`), not `main`. Until that merges and deploys, no browser
+sends a GET-form request. Deploying the Worker first is the safe order, not a
+mistake: the Worker handles the path either way, and if it were the other way
+round the GET traffic would land on Vercel and cost invocations.
+
+⚠️ `ROLLBACK` is now weaker than §3.14 states. Deleting the route falls back to
+the Next route, whose **GET handler is also only on that unmerged branch**. So
+after trydos ships, rollback restores POST fully but GET only if the deployed
+trydos build contains `811c338f`. Check that before rolling back.
+
+Parity confirmed by reading both sides: the token maps in
+`../trydos/utils/serviceTokens.ts` and `packages/shared/src/services.ts` are
+identical on all seven services, and `buildProxyGetUrl`
+(`../trydos/utils/proxyGetUrl.ts:43`) deliberately never sends `d=true`, so the
+Worker's `needDecode` is correctly false on this path.
+
 ### 3.11 Zone audit (read-only API token, 2026-08-24)
 
 Zone `ramaaz.dev` — id `df0581418328bcb0b4cde6d982f5c3ea`, status active, plan

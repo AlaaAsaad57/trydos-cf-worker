@@ -20,9 +20,20 @@
   //
   // /api/proxy-edge is kept so the Worker stays reachable under a stable name
   // for testing after cutover.
+  //
+  // ⚠️ THE TRAILING `*` IS LOAD-BEARING. A Cloudflare route pattern without it
+  // does NOT match a URL that carries a query string. Measured 2026-09-01:
+  // with the exact pattern, `GET /api/proxy?s=…&u=…` fell through to Vercel
+  // (x-vercel-id present) while `POST /api/proxy` reached the Worker. The GET
+  // contract puts all of its metadata in the query string, so without the `*`
+  // that half of the Worker can never run.
+  //
+  // Nothing else is swallowed: `app/api/proxy` is the only /api/proxy* route
+  // in trydos, so the wildcard only widens this Worker onto URLs it already
+  // owns.
   "routes": [
-    { "pattern": "trydos.ramaaz.dev/api/proxy", "zone_name": "ramaaz.dev" },
-    { "pattern": "trydos.ramaaz.dev/api/proxy-edge", "zone_name": "ramaaz.dev" }
+    { "pattern": "trydos.ramaaz.dev/api/proxy*", "zone_name": "ramaaz.dev" },
+    { "pattern": "trydos.ramaaz.dev/api/proxy-edge*", "zone_name": "ramaaz.dev" }
   ]
 
   // Backend base URLs are secrets, set with `wrangler secret put`:

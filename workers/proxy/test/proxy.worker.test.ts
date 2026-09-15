@@ -63,12 +63,25 @@ const verifiedCookie = `User-Data=${encodeURIComponent(
 )}`;
 
 describe("method contract", () => {
-  it("refuses anything that is not POST", async () => {
+  // Two contracts now: POST for every client-side call, and GET so a
+  // `<link rel="preload">` can start one during HTML parse. Anything else is
+  // still refused.
+  it("refuses anything that is neither POST nor GET", async () => {
     const response = await SELF.fetch("https://trydos.ramaaz.dev/api/proxy", {
-      method: "GET",
+      method: "PUT",
     });
     expect(response.status).toBe(405);
-    expect(response.headers.get("allow")).toBe("POST");
+    expect(response.headers.get("allow")).toBe("GET, POST");
+  });
+
+  it("refuses a GET that came from another site", async () => {
+    const response = await SELF.fetch(
+      "https://trydos.ramaaz.dev/api/proxy?s=market&u=/x",
+      { method: "GET", headers: { "sec-fetch-site": "cross-site" } },
+    );
+    // The generic failure, not a distinct one: a probe must not be able to tell
+    // one kind of rejection from another.
+    expect(response.status).toBe(503);
   });
 });
 
